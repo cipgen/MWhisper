@@ -4,57 +4,59 @@
 
 ## Features
 
+## Features
+
 - 🎤 **Real-time voice transcription** — powered by Parakeet-MLX
-- ⌨️ **Global hotkey** — ⌘⇧D (Cmd+Shift+D) to start/stop recording
-- 📝 **Auto-insert text** — pastes transcribed text into any active window
-- 🌍 **25 languages** with auto-detection
-- 🧹 **Filler word removal** — removes "uh", "um", etc.
-- 📊 **Menu Bar app** — status indicator and controls
-- 📜 **Dictation history** — stores last 20 transcriptions
-- ⚙️ **Customizable hotkey** — change via menu "Change Hotkey..."
-
-## Requirements
-
-- macOS (Apple Silicon M1/M2/M3/M4)
-- Python 3.10+
-- ffmpeg (for audio processing)
-
-## Installation
-
-```bash
-# Clone repository
-git clone https://github.com/your-repo/MWhisper.git
-cd MWhisper
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install ffmpeg
-brew install ffmpeg
-
-# Install dependencies
-pip install -r requirements.txt
-```
+- 🌐 **Voice Translation** — Translates speech to English (configurable) via OpenAI
+- ✨ **Smart Fix** — Corrects grammar and style without translating (preserves language)
+- ⌨️ **Push-to-Talk Hotkeys** — 3 distinct hotkeys for different modes
+- 📝 **Auto-insert text** — Pastes text into any active window (Word, browser, messengers)
+- ⚙️ **Customizable Prompts** — Tweak system prompts for translation and grammar correction
+- 📊 **Menu Bar app** — Status indicator and quick settings
+- 📜 **Dictation history** — Stores last 20 transcriptions
 
 ## Usage
 
-### Run from source:
+### 🚀 How to Run (Development)
+To run the app directly from python source:
+
 ```bash
+# activate virtual environment
 source venv/bin/activate
+
+# run main script
 python main.py
 ```
 
-### Build standalone app:
+### 📦 How to Build (Release Version)
+To build a standalone `.app` bundle that runs without a terminal:
+
 ```bash
+# 1. Kill any running instance
+pkill -9 MWhisper
+
+# 2. Clean previous build artifacts
+rm -rf build dist
+
+# 3. Activate venv
 source venv/bin/activate
+
+# 4. Build with PyInstaller
 pyinstaller --clean --noconfirm MWhisper.spec
+
+# 5. Install to Applications (Optional)
+rm -rf /Applications/MWhisper.app
 cp -R dist/MWhisper.app /Applications/
 ```
 
-### Controls:
-- **⌘⇧D** (Cmd+Shift+D) — Start/stop recording
-- **Menu Bar Icon** — Access history, settings, change hotkey
+### 🎮 Controls (Default Hotkeys)
+| Mode | Hotkey | Description |
+|------|--------|-------------|
+| **Dictation** | `Ctrl + 1` | Speech to Text (Exact) |
+| **Translate** | `Ctrl + 2` | Speech to English Text |
+| **Smart Fix** | `Cmd + Shift + E` | Fix Grammar & Style (No translate) |
+
+> **Note:** You can customize any of these hotkeys in **Settings** via the menu bar icon.
 
 ## Permissions Required
 

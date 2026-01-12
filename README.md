@@ -1,26 +1,35 @@
-# MWhisper - Voice Dictation Application for Mac M1
+# MWhisper - Voice Dictation for Mac
 
-Local voice dictation using Parakeet-MLX (NVIDIA Parakeet-TDT-0.6B-v3) optimized for Apple Silicon.
+🎤 Local voice dictation using [Parakeet-MLX](https://github.com/senstella/parakeet-mlx) (NVIDIA Parakeet-TDT-0.6B-v3), optimized for Apple Silicon.
 
 ## Features
 
-- 🎤 Real-time voice transcription
-- ⌨️ Global hotkey activation (Cmd+Shift+D)
-- 📝 Auto-insert text into active window
-- 🌍 25 languages with auto-detection
-- 🧹 Filler word removal ("uh", "um", etc.)
-- 📊 Menu Bar status indicator
-- 📜 Dictation history
+- 🎤 **Real-time voice transcription** — powered by Parakeet-MLX
+- ⌨️ **Global hotkey** — ⌘⇧D (Cmd+Shift+D) to start/stop recording
+- 📝 **Auto-insert text** — pastes transcribed text into any active window
+- 🌍 **25 languages** with auto-detection
+- 🧹 **Filler word removal** — removes "uh", "um", etc.
+- 📊 **Menu Bar app** — status indicator and controls
+- 📜 **Dictation history** — stores last 20 transcriptions
+- ⚙️ **Customizable hotkey** — change via menu "Change Hotkey..."
 
 ## Requirements
 
-- macOS (Apple Silicon M1/M2/M3)
+- macOS (Apple Silicon M1/M2/M3/M4)
 - Python 3.10+
 - ffmpeg (for audio processing)
 
 ## Installation
 
 ```bash
+# Clone repository
+git clone https://github.com/your-repo/MWhisper.git
+cd MWhisper
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
 # Install ffmpeg
 brew install ffmpeg
 
@@ -30,14 +39,58 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Run from source:
 ```bash
+source venv/bin/activate
 python main.py
 ```
 
-- **Cmd+Shift+D** — Start/stop recording
-- Click Menu Bar icon for settings and history
+### Build standalone app:
+```bash
+source venv/bin/activate
+pyinstaller --clean --noconfirm MWhisper.spec
+cp -R dist/MWhisper.app /Applications/
+```
 
-## Accessibility Permission
+### Controls:
+- **⌘⇧D** (Cmd+Shift+D) — Start/stop recording
+- **Menu Bar Icon** — Access history, settings, change hotkey
 
-This app requires Accessibility permission for global hotkeys.
-Go to: System Preferences → Security & Privacy → Privacy → Accessibility
+## Permissions Required
+
+MWhisper requires the following macOS permissions:
+
+| Permission | Purpose |
+|------------|---------|
+| **Accessibility** | Text insertion via keyboard simulation |
+| **Input Monitoring** | Global hotkey detection |
+| **Microphone** | Voice recording |
+
+Go to: **System Settings → Privacy & Security** to grant permissions.
+
+## Configuration
+
+Settings are stored in `config.json`:
+
+```json
+{
+    "hotkey": "<cmd>+<shift>+d",
+    "microphone_id": null,
+    "language": "auto",
+    "filter_fillers": true,
+    "history_size": 20
+}
+```
+
+## Debug Logs
+
+Logs are written to `~/Desktop/mwhisper_debug.log` when running the .app bundle.
+
+## Known Limitations
+
+- **Code-switching** (mixing languages in one phrase) is not supported by Parakeet-MLX
+- English words spoken while in "Russian mode" will be transliterated (e.g., "hello" → "хелоу")
+
+## License
+
+MIT

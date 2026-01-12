@@ -303,6 +303,59 @@ class MWhisperApp:
         if self._is_recording and self._audio_capture:
             self._audio_capture.stop()
     
+    def _on_change_hotkey(self) -> None:
+        """Handle change hotkey request"""
+        print("🔧 Change hotkey requested")
+        
+        # Show alert to notify user
+        if self._menu_app:
+            self._menu_app.show_alert(
+                "Change Hotkey",
+                "After closing this dialog, press your new key combination.\n\nYou have 10 seconds."
+            )
+        
+        print("🔧 Starting hotkey capture...")
+        
+        # Stop current hotkey listener to avoid conflicts
+        if self._hotkey_manager:
+            self._hotkey_manager.stop()
+        
+        def on_hotkey_captured(pynput_format: str, display_format: str):
+            print(f"🔧 Hotkey captured: {pynput_format} ({display_format})")
+            if pynput_format and display_format:
+                # Save new hotkey to settings
+                self.settings.set("hotkey", pynput_format)
+                
+                # Update hotkey manager
+                if self._hotkey_manager:
+                    self._hotkey_manager.set_hotkey(pynput_format)
+                    self._hotkey_manager.start()
+                
+                # Update menu display
+                if self._menu_app:
+                    self._menu_app.set_hotkey_display(display_format)
+                    self._menu_app.show_alert(
+                        "Hotkey Changed",
+                        f"New hotkey: {display_format}"
+                    )
+                
+                print(f"✓ Hotkey changed to: {display_format}")
+            else:
+                print("🔧 Hotkey capture timeout/cancelled")
+                # Timeout or cancelled - restore previous hotkey
+                if self._hotkey_manager:
+                    self._hotkey_manager.start()
+                
+                if self._menu_app:
+                    self._menu_app.show_alert(
+                        "Hotkey Change Cancelled",
+                        "No valid key combination detected."
+                    )
+        
+        # Use existing hotkey manager to capture
+        if self._hotkey_manager:
+            self._hotkey_manager.capture_hotkey(on_hotkey_captured, timeout=10.0)
+    
     def run(self) -> None:
         """Run the application"""
         print("=" * 50)
@@ -329,6 +382,7 @@ class MWhisperApp:
             on_toggle=self.toggle_recording,
             on_settings=self._on_settings,
             on_history_select=self._on_history_select,
+            on_change_hotkey=self._on_change_hotkey,
             on_quit=self._on_quit
         )
         

@@ -21,6 +21,7 @@ class MenuBarApp(rumps.App):
         on_toggle: Optional[Callable[[], None]] = None,
         on_settings: Optional[Callable[[], None]] = None,
         on_history_select: Optional[Callable[[int], None]] = None,
+        on_change_hotkey: Optional[Callable[[], None]] = None,
         on_quit: Optional[Callable[[], None]] = None
     ):
         """
@@ -30,6 +31,7 @@ class MenuBarApp(rumps.App):
             on_toggle: Callback for start/stop recording
             on_settings: Callback for opening settings
             on_history_select: Callback when history item selected
+            on_change_hotkey: Callback for changing hotkey
             on_quit: Callback before quitting
         """
         # Initialize with default icon
@@ -43,6 +45,7 @@ class MenuBarApp(rumps.App):
         self._on_toggle = on_toggle
         self._on_settings = on_settings
         self._on_history_select = on_history_select
+        self._on_change_hotkey = on_change_hotkey
         self._on_quit = on_quit
         
         self._hotkey_display = "⌘⇧D"
@@ -101,11 +104,17 @@ class MenuBarApp(rumps.App):
             callback=self._on_settings_click
         )
         
+        # Change Hotkey
+        self._change_hotkey_item = rumps.MenuItem(
+            "Change Hotkey...",
+            callback=self._on_change_hotkey_click
+        )
+        
         # Quit
         quit_item = rumps.MenuItem("Quit MWhisper", callback=self._on_quit_click)
         
         # Version info (for debugging)
-        version_item = rumps.MenuItem("Build: 2026-01-11-v10-fix")
+        version_item = rumps.MenuItem("Build: 2026-01-11-v13")
         version_item.set_callback(None)
         
         # Build menu
@@ -116,6 +125,7 @@ class MenuBarApp(rumps.App):
             None,  # Separator
             self._history_menu,
             self._settings_item,
+            self._change_hotkey_item,
             None,  # Separator
             version_item,
             quit_item
@@ -134,6 +144,17 @@ class MenuBarApp(rumps.App):
             rumps.alert(
                 title="Settings",
                 message="Settings will be available in a future update.",
+                ok="OK"
+            )
+    
+    def _on_change_hotkey_click(self, sender: rumps.MenuItem) -> None:
+        """Handle change hotkey click"""
+        if self._on_change_hotkey:
+            self._on_change_hotkey()
+        else:
+            rumps.alert(
+                title="Change Hotkey",
+                message="Press a new key combination when prompted.",
                 ok="OK"
             )
     
@@ -244,6 +265,7 @@ def create_menu_bar_app(
     on_toggle: Optional[Callable[[], None]] = None,
     on_settings: Optional[Callable[[], None]] = None,
     on_history_select: Optional[Callable[[int], None]] = None,
+    on_change_hotkey: Optional[Callable[[], None]] = None,
     on_quit: Optional[Callable[[], None]] = None
 ) -> MenuBarApp:
     """
@@ -253,6 +275,7 @@ def create_menu_bar_app(
         on_toggle: Callback for start/stop
         on_settings: Callback for settings
         on_history_select: Callback for history selection
+        on_change_hotkey: Callback for changing hotkey
         on_quit: Callback before quit
     
     Returns:
@@ -262,6 +285,7 @@ def create_menu_bar_app(
         on_toggle=on_toggle,
         on_settings=on_settings,
         on_history_select=on_history_select,
+        on_change_hotkey=on_change_hotkey,
         on_quit=on_quit
     )
 

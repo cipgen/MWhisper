@@ -123,7 +123,7 @@ class SettingsWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MWhisper Settings")
-        self.setFixedSize(500, 480) # Slightly taller
+        self.setFixedSize(500, 600) # Increased height for prompt area
         
         self.config = self._load_config()
         self._setup_ui()
@@ -148,6 +148,7 @@ class SettingsWindow(QWidget):
     def _save_config(self):
         try:
             self.config["openai_api_key"] = self.api_key_input.text().strip()
+            self.config["translation_prompt"] = self.prompt_input.toPlainText().strip()
             config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", CONFIG_FILE)
             with open(config_path, 'w') as f:
                 json.dump(self.config, f, indent=4)
@@ -175,6 +176,20 @@ class SettingsWindow(QWidget):
         self.chk_show_key = QCheckBox("Show API Key")
         self.chk_show_key.stateChanged.connect(self._toggle_show_key)
         layout.addWidget(self.chk_show_key)
+
+        layout.addWidget(QLabel("System Prompt (for Translation):"))
+        default_prompt = (
+            "Переведи этот текст на английский язык. "
+            "Исправь ошибки и напиши простыми словами. "
+            "Верни ТОЛЬКО перевод, без пояснений."
+        )
+        current_prompt = self.config.get("translation_prompt", default_prompt)
+        from PySide6.QtWidgets import QPlainTextEdit
+        self.prompt_input = QPlainTextEdit(current_prompt)
+        self.prompt_input.setPlaceholderText("Enter system instructions for GPT...")
+        self.prompt_input.setFixedHeight(80)
+        self.prompt_input.setStyleSheet("background: #fdfdfd; color: #111111;")
+        layout.addWidget(self.prompt_input)
         
         line = QFrame()
         line.setFrameShape(QFrame.HLine)

@@ -116,6 +116,10 @@ class MWhisperApp:
         self._menu_app: Optional[MenuBarApp] = None
         self._translator: Optional[Translator] = None
         
+        # Reload flag for thread-safe UI updates
+        self._needs_settings_reload = False
+        self._reload_timer = None
+        
         # State
         self._is_recording = False
         self._is_translate_recording = False
@@ -292,8 +296,13 @@ class MWhisperApp:
                 return
             
             prompt = self.settings.get("translation_prompt", "")
+            
+            # Always update translator prompt in case it changed
             if self._translator is None:
                 self._translator = Translator(api_key, prompt)
+            else:
+                self._translator.api_key = api_key
+                self._translator.prompt = prompt or Translator.DEFAULT_PROMPT
             
             translated = self._translator.translate(text)
             self._on_translation_complete(translated or "", duration)
@@ -450,9 +459,8 @@ class MWhisperApp:
                 
                 if process.returncode == 0:
                     print("Settings saved, reloading...")
-                    # Schedule reload on main thread (actually this is a thread, so can call methods)
-                    # Use rumps timer or just direct call if thread-safe
-                    self._reload_settings()
+                    # Schedule reload on main thread via timer flag
+                    self._needs_settings_reload = True
                 else:
                     if process.stderr:
                         print(f"Settings error: {process.stderr}")
@@ -627,6 +635,11 @@ class MWhisperApp:
             on_quit=self._on_quit
         )
         
+        # Start reload timer (checks every 0.5s for main thread updates)
+        import rumps
+        self._reload_timer = rumps.Timer(self._check_reload_needed, 0.5)
+        self._reload_timer.start()
+        
         # Set hotkey display
         self._menu_app.set_hotkey_display(
             self._dictate_hotkey.get_display_string()
@@ -643,6 +656,12 @@ class MWhisperApp:
         
         # Run menu bar app (blocking)
         self._menu_app.run()
+
+    def _check_reload_needed(self, sender):
+        """Timer callback to check if settings reload is requested"""
+        if self._needs_settings_reload:
+            self._needs_settings_reload = False
+            self._reload_settings()
 
 
 def run_app() -> None:

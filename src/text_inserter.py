@@ -30,18 +30,19 @@ class TextInserter:
         Returns:
             True if successful, False otherwise
         """
-        print("=== V10: insert() called ===")
+        # print("=== V10: insert() called ===")
         if not text:
             return True
         
         try:
-            # Use pbcopy + AppleScript keystroke (the fixed method)
-            return self._insert_via_applescript(text)
+            # Use Quartz method (robust, doesn't steal focus like osascript)
+            return self._insert_via_clipboard(text)
         except Exception as e:
             print(f"Text insertion error: {e}")
             import traceback
             traceback.print_exc()
-            return False
+            # Fallback to AppleScript
+            return self._insert_via_applescript(text)
     
     def _insert_via_keystroke(self, text: str) -> bool:
         """Insert text by simulating keystrokes"""

@@ -146,6 +146,10 @@ class PushToTalkHotkey:
     def _on_key_press(self, key) -> None:
         """Handle key press event from master listener"""
         key_name = self._get_key_name(key)
+        
+        # DEBUG: Log raw key to help diagnose Ctrl+3 issue
+        # print(f"DEBUG: press key={key} key_name={key_name} mods={self._current_modifiers}")
+        
         if not key_name:
             return
         
@@ -156,7 +160,7 @@ class PushToTalkHotkey:
             with self._lock:
                 if not self._is_pressed:
                     self._is_pressed = True
-                    # print(f"🔥 HOTKEY PRESSED: {self.hotkey_string}")
+                    print(f"🔥 HOTKEY PRESSED: {self.hotkey_string}")
                     try:
                         self.on_press_callback()
                     except Exception as e:
@@ -181,7 +185,7 @@ class PushToTalkHotkey:
             with self._lock:
                 if self._is_pressed:
                     self._is_pressed = False
-                    # print(f"🔥 HOTKEY RELEASED: {self.hotkey_string}")
+                    print(f"🔥 HOTKEY RELEASED: {self.hotkey_string}")
                     try:
                         self.on_release_callback()
                     except Exception as e:

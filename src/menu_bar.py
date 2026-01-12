@@ -22,7 +22,8 @@ class MenuBarApp(rumps.App):
         on_settings: Optional[Callable[[], None]] = None,
         on_history_select: Optional[Callable[[int], None]] = None,
         on_change_hotkey: Optional[Callable[[], None]] = None,
-        on_quit: Optional[Callable[[], None]] = None
+        on_quit: Optional[Callable[[], None]] = None,
+        on_tick: Optional[Callable[[rumps.Timer], None]] = None
     ):
         """
         Initialize Menu Bar app.
@@ -33,6 +34,7 @@ class MenuBarApp(rumps.App):
             on_history_select: Callback when history item selected
             on_change_hotkey: Callback for changing hotkey
             on_quit: Callback before quitting
+            on_tick: Callback called periodically (e.g. every 0.5s)
         """
         # Initialize with default icon
         super().__init__(
@@ -47,11 +49,18 @@ class MenuBarApp(rumps.App):
         self._on_history_select = on_history_select
         self._on_change_hotkey = on_change_hotkey
         self._on_quit = on_quit
+        self._on_tick = on_tick
         
         self._hotkey_display = "⌘⇧D"
         
         # Build menu
         self._build_menu()
+        
+    # @rumps.timer(0.5)
+    def _on_tick_callback(self, sender):
+        """Internal timer callback"""
+        if self._on_tick:
+            self._on_tick(sender)
     
     def _get_icon_path(self, status: str) -> Optional[str]:
         """Get icon path for status"""
@@ -254,7 +263,8 @@ def create_menu_bar_app(
     on_settings: Optional[Callable[[], None]] = None,
     on_history_select: Optional[Callable[[int], None]] = None,
     on_change_hotkey: Optional[Callable[[], None]] = None,
-    on_quit: Optional[Callable[[], None]] = None
+    on_quit: Optional[Callable[[], None]] = None,
+    on_tick: Optional[Callable[[rumps.Timer], None]] = None
 ) -> MenuBarApp:
     """
     Create and return a MenuBarApp instance.
@@ -265,6 +275,7 @@ def create_menu_bar_app(
         on_history_select: Callback for history selection
         on_change_hotkey: Callback for changing hotkey
         on_quit: Callback before quit
+        on_tick: Periodic callback
     
     Returns:
         MenuBarApp instance
@@ -274,7 +285,8 @@ def create_menu_bar_app(
         on_settings=on_settings,
         on_history_select=on_history_select,
         on_change_hotkey=on_change_hotkey,
-        on_quit=on_quit
+        on_quit=on_quit,
+        on_tick=on_tick
     )
 
 

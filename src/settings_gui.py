@@ -158,7 +158,19 @@ class SettingsWindow(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
 
     def _setup_ui(self):
-        layout = QVBoxLayout()
+        # Main layout for the window
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Scroll Area
+        from PySide6.QtWidgets import QScrollArea
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        
+        # Widget to hold the form
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
         layout.setContentsMargins(25, 25, 25, 25)
         layout.setSpacing(15)
         
@@ -177,19 +189,34 @@ class SettingsWindow(QWidget):
         self.chk_show_key.stateChanged.connect(self._toggle_show_key)
         layout.addWidget(self.chk_show_key)
 
-        layout.addWidget(QLabel("System Prompt (for Translation):"))
-        default_prompt = (
+        # Translation Prompt
+        layout.addWidget(QLabel("System Prompt (Translation):"))
+        default_trans_prompt = (
             "Переведи этот текст на английский язык. "
             "Исправь ошибки и напиши простыми словами. "
             "Верни ТОЛЬКО перевод, без пояснений."
         )
-        current_prompt = self.config.get("translation_prompt", default_prompt)
+        current_trans_prompt = self.config.get("translation_prompt", default_trans_prompt)
         from PySide6.QtWidgets import QPlainTextEdit
-        self.prompt_input = QPlainTextEdit(current_prompt)
-        self.prompt_input.setPlaceholderText("Enter system instructions for GPT...")
+        self.prompt_input = QPlainTextEdit(current_trans_prompt)
+        self.prompt_input.setPlaceholderText("Instructions for Translation...")
         self.prompt_input.setFixedHeight(80)
         self.prompt_input.setStyleSheet("background: #fdfdfd; color: #111111;")
         layout.addWidget(self.prompt_input)
+        
+        # Smart Fix Prompt
+        layout.addWidget(QLabel("System Prompt (Smart Fix):"))
+        default_fix_prompt = (
+            "Исправь грамматические ошибки, расставь знаки препинания и улучши стиль. "
+            "Не переводи. Сохрани оригинальный язык. "
+            "Верни ТОЛЬКО исправленный текст."
+        )
+        current_fix_prompt = self.config.get("fix_prompt", default_fix_prompt)
+        self.fix_prompt_input = QPlainTextEdit(current_fix_prompt)
+        self.fix_prompt_input.setPlaceholderText("Instructions for Grammar/Style Fix...")
+        self.fix_prompt_input.setFixedHeight(80)
+        self.fix_prompt_input.setStyleSheet("background: #fdfdfd; color: #111111;")
+        layout.addWidget(self.fix_prompt_input)
         
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
@@ -201,40 +228,36 @@ class SettingsWindow(QWidget):
         lbl_hotkeys.setFont(QFont("System", 14, QFont.Bold))
         layout.addWidget(lbl_hotkeys)
         
-        # Dictation
-        h_layout1 = QHBoxLayout()
-        h_layout1.addWidget(QLabel("Dictation:", minimumWidth=80))
+        # Helper to create hotkey row
+        def add_hotkey_row(label, key, config_key, default_val):
+            h_layout = QHBoxLayout()
+            h_layout.addWidget(QLabel(label, minimumWidth=80))
+            
+            edit = QLineEdit(self._get_display_hotkey(self.config.get(config_key, default_val)))
+            edit.setReadOnly(True)
+            edit.setAlignment(Qt.AlignCenter)
+            edit.setStyleSheet("QLineEdit { background: #f0f0f0; color: #333; font-weight: bold; }")
+            h_layout.addWidget(edit)
+            
+            btn = QPushButton("Change")
+            btn.clicked.connect(lambda: self._open_recorder(key))
+            h_layout.addWidget(btn)
+            layout.addLayout(h_layout)
+            return edit
+
+        self.edit_dictation = add_hotkey_row("Dictation:", "dictation", "hotkey", "<cmd>+<shift>+d")
+        self.edit_translate = add_hotkey_row("Translate:", "translate", "translate_hotkey", "<cmd>+<shift>+u")
+        self.edit_fix = add_hotkey_row("Smart Fix:", "fix", "fix_hotkey", "<cmd>+<shift>+e")
         
-        self.edit_dictation = QLineEdit(self._get_display_hotkey(self.config.get("hotkey", "<cmd>+<shift>+d")))
-        self.edit_dictation.setReadOnly(True)
-        self.edit_dictation.setAlignment(Qt.AlignCenter)
-        self.edit_dictation.setStyleSheet("QLineEdit { background: #f0f0f0; color: #333; font-weight: bold; }")
-        h_layout1.addWidget(self.edit_dictation)
+        layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
         
-        self.btn_dictation = QPushButton("Change")
-        self.btn_dictation.clicked.connect(lambda: self._open_recorder("dictation"))
-        h_layout1.addWidget(self.btn_dictation)
-        layout.addLayout(h_layout1)
+        # Set scroll widget
+        scroll.setWidget(content_widget)
+        main_layout.addWidget(scroll)
         
-        # Translate
-        h_layout2 = QHBoxLayout()
-        h_layout2.addWidget(QLabel("Translate:", minimumWidth=80))
-        
-        self.edit_translate = QLineEdit(self._get_display_hotkey(self.config.get("translate_hotkey", "<cmd>+<shift>+u")))
-        self.edit_translate.setReadOnly(True)
-        self.edit_translate.setAlignment(Qt.AlignCenter)
-        self.edit_translate.setStyleSheet("QLineEdit { background: #f0f0f0; color: #333; font-weight: bold; }")
-        h_layout2.addWidget(self.edit_translate)
-        
-        self.btn_translate = QPushButton("Change")
-        self.btn_translate.clicked.connect(lambda: self._open_recorder("translate"))
-        h_layout2.addWidget(self.btn_translate)
-        layout.addLayout(h_layout2)
-        
-        layout.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
-        
-        # Buttons
+        # Buttons area (outside scroll)
         btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(20, 10, 20, 20)
         btn_layout.addStretch()
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(QApplication.quit)
@@ -245,8 +268,7 @@ class SettingsWindow(QWidget):
         btn_save.clicked.connect(self._save_config)
         btn_layout.addWidget(btn_save)
         
-        layout.addLayout(btn_layout)
-        self.setLayout(layout)
+        main_layout.addLayout(btn_layout)
 
     def _toggle_show_key(self, state):
         if self.chk_show_key.isChecked():
@@ -288,9 +310,12 @@ class SettingsWindow(QWidget):
             if target_type == "dictation":
                 self.edit_dictation.setText(display)
                 self.config["hotkey"] = current_hotkey
-            else:
+            elif target_type == "translate":
                 self.edit_translate.setText(display)
                 self.config["translate_hotkey"] = current_hotkey
+            elif target_type == "fix":
+                self.edit_fix.setText(display)
+                self.config["fix_hotkey"] = current_hotkey
 
 def run_settings():
     app = QApplication(sys.argv)

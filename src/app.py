@@ -111,6 +111,7 @@ class MWhisperApp:
         self._audio_capture: Optional[AudioCapture] = None
         self._dictate_hotkey: Optional[PushToTalkHotkey] = None
         self._translate_hotkey: Optional[PushToTalkHotkey] = None
+        self._fix_hotkey: Optional[PushToTalkHotkey] = None
         self._hotkey_manager: Optional[HotkeyManager] = None  # For change_hotkey
         self._text_inserter: Optional[TextInserter] = None
         self._menu_app: Optional[MenuBarApp] = None
@@ -123,6 +124,7 @@ class MWhisperApp:
         # State
         self._is_recording = False
         self._is_translate_recording = False
+        self._is_fix_recording = False
         self._recording_start_time = 0.0
         self._lock = threading.Lock()
     
@@ -345,6 +347,146 @@ class MWhisperApp:
                 )
         else:
             print("✗ Failed to insert translation")
+
+    def _start_fix_recording(self) -> None:
+        """Start recording for smart fix"""
+        print("\n✨ Starting smart fix recording...")
+        
+        self._is_fix_recording = True
+        self._recording_start_time = time.time()
+        
+        # Update UI
+        if self._menu_app:
+            self._menu_app.set_status(
+                MenuBarApp.STATUS_RECORDING,
+                "Recording for Smart Fix..."
+            )
+        
+        # Start audio capture
+        audio = self._ensure_audio_capture()
+        audio.start()
+    
+    def _stop_fix_recording(self) -> None:
+        """Stop recording and process for smart fix"""
+        print("⏹ Stopping smart fix recording...")
+        
+        # Get recorded audio
+        audio = self._ensure_audio_capture()
+        audio_data = audio.stop()
+        
+        duration = time.time() - self._recording_start_time
+        self._is_fix_recording = False
+        
+        # Update UI
+        if self._menu_app:
+            self._menu_app.set_status(
+                MenuBarApp.STATUS_PROCESSING,
+                "Smart Fixing..."
+            )
+        
+        # Process in background
+        threading.Thread(
+            target=self._process_audio_for_fix,
+            args=(audio_data, duration),
+            daemon=True
+        ).start()
+
+    def _process_audio_for_fix(self, audio_data: np.ndarray, duration: float) -> None:
+        """Process recorded audio and smart fix"""
+        try:
+            if len(audio_data) == 0:
+                print("No audio recorded")
+                self._on_fix_complete("", duration)
+                return
+            
+            # Check audio level
+            level = get_audio_level(audio_data)
+            if level < -50:
+                print(f"Audio too quiet: {level:.1f} dB")
+                self._on_fix_complete("", duration)
+                return
+            
+            print(f"Processing {len(audio_data)} samples ({duration:.1f}s)...")
+            
+            # Transcribe
+            transcriber = self._ensure_transcriber()
+            result = transcriber.transcribe(audio_data)
+            
+            text = result.get("text", "")
+            print(f"Transcription: {text}")
+            
+            if not text:
+                self._on_fix_complete("", duration)
+                return
+            
+            # Process via OpenAI
+            api_key = self.settings.get("openai_api_key", "")
+            if not api_key:
+                print("Error: OpenAI API key not configured")
+                if self._menu_app:
+                    self._menu_app.show_alert(
+                        "API Key Required",
+                        "Please set your OpenAI API key in Settings."
+                    )
+                self._on_fix_complete("", duration)
+                return
+            
+            default_fix_prompt = (
+                "Исправь грамматические ошибки, расставь знаки препинания и улучши стиль. "
+                "Не переводи. Сохрани оригинальный язык. "
+                "Верни ТОЛЬКО исправленный текст."
+            )
+            prompt = self.settings.get("fix_prompt", default_fix_prompt)
+            
+            # Always update translator prompt
+            # We reuse the Translator class but with a different prompt
+            if self._translator is None:
+                self._translator = Translator(api_key, prompt)
+            else:
+                self._translator.api_key = api_key
+                self._translator.prompt = prompt
+            
+            fixed = self._translator.translate(text)
+            self._on_fix_complete(fixed or "", duration)
+            
+        except Exception as e:
+            print(f"Smart Fix processing error: {e}")
+            import traceback
+            traceback.print_exc()
+            self._on_fix_complete("", duration)
+
+    def _on_fix_complete(self, text: str, duration: float) -> None:
+        """Handle fix completion"""
+        # Update UI
+        if self._menu_app:
+            self._menu_app.set_status(MenuBarApp.STATUS_IDLE, "Ready")
+        
+        if not text:
+            print("No text to insert")
+            return
+        
+        # Add to history
+        self.history.add(f"[FIX] {text}", duration, "mix")
+        
+        # Update history menu
+        if self._menu_app:
+            history_items = [str(e) for e in self.history.get_recent(10)]
+            self._menu_app.update_history_menu(history_items)
+        
+        # Insert text
+        print(f"Inserting fixed text: {text}")
+        inserter = self._ensure_text_inserter()
+        success = inserter.insert(text)
+        
+        if success:
+            print("✓ Fixed text inserted successfully")
+            if self._menu_app:
+                self._menu_app.show_notification(
+                    "MWhisper Smart Fix",
+                    f"Inserted: {text[:50]}..."
+                )
+        else:
+            print("✗ Failed to insert fixed text")
     
     def _process_audio(self, audio_data: np.ndarray, duration: float) -> None:
         """Process recorded audio"""
@@ -503,6 +645,18 @@ class MWhisperApp:
                 )
                 self._translate_hotkey.start()
             
+            # Fix Hotkey
+            if self._fix_hotkey:
+                self._fix_hotkey.stop()
+                
+            fix_hotkey_str = self.settings.get("fix_hotkey", "<cmd>+<shift>+e")
+            self._fix_hotkey = PushToTalkHotkey(
+                fix_hotkey_str,
+                on_press=self._start_fix_recording,
+                on_release=self._stop_fix_recording
+            )
+            self._fix_hotkey.start()
+            
             # Update menu display
             if self._menu_app:
                 mapping = {
@@ -620,6 +774,15 @@ class MWhisperApp:
         )
         self._translate_hotkey.start()
         
+        # Setup smart fix hotkey (push-to-talk)
+        fix_hotkey = self.settings.get("fix_hotkey", "<cmd>+<shift>+e")
+        self._fix_hotkey = PushToTalkHotkey(
+            hotkey=fix_hotkey,
+            on_press=self._start_fix_recording,
+            on_release=self._stop_fix_recording
+        )
+        self._fix_hotkey.start()
+        
         # Legacy hotkey manager for change_hotkey functionality
         self._hotkey_manager = HotkeyManager(
             callback=lambda: None,
@@ -632,13 +795,9 @@ class MWhisperApp:
             on_settings=self._on_settings,
             on_history_select=self._on_history_select,
             on_change_hotkey=self._on_change_hotkey,
-            on_quit=self._on_quit
+            on_quit=self._on_quit,
+            on_tick=self._check_reload_needed  # Pass timer callback here
         )
-        
-        # Start reload timer (checks every 0.5s for main thread updates)
-        import rumps
-        self._reload_timer = rumps.Timer(self._check_reload_needed, 0.5)
-        self._reload_timer.start()
         
         # Set hotkey display
         self._menu_app.set_hotkey_display(
@@ -652,6 +811,7 @@ class MWhisperApp:
         print(f"\n✓ Ready! (Push-to-talk mode)")
         print(f"  {self._dictate_hotkey.get_display_string()} — Hold to dictate")
         print(f"  {self._translate_hotkey.get_display_string()} — Hold to dictate + translate")
+        print(f"  {self._fix_hotkey.get_display_string()} — Hold to dictate + smart fix")
         print("Click the menu bar icon for options.\n")
         
         # Run menu bar app (blocking)

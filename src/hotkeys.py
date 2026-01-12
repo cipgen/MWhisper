@@ -9,10 +9,80 @@ import threading
 import subprocess
 
 
+class MasterHotkeyListener:
+    """
+    Singleton listener that dispatches key events to registered hotkey handlers.
+    This prevents creating multiple pynput Listeners which causes crashes on macOS.
+    """
+    _instance = None
+    _lock = threading.Lock()
+    _listener = None
+    _handlers = set()
+    _is_running = False
+
+    @classmethod
+    def get_instance(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls()
+            return cls._instance
+
+    def register(self, handler):
+        with self._lock:
+            self._handlers.add(handler)
+            if not self._is_running:
+                self._start()
+
+    def unregister(self, handler):
+        with self._lock:
+            self._handlers.discard(handler)
+            if not self._handlers and self._is_running:
+                self._stop()
+
+    def _start(self):
+        try:
+            self._listener = keyboard.Listener(
+                on_press=self._on_key_press,
+                on_release=self._on_key_release
+            )
+            self._listener.start()
+            self._is_running = True
+            print("⌨️  Master Hotkey Listener started")
+        except Exception as e:
+            print(f"Failed to start master listener: {e}")
+            raise
+
+    def _stop(self):
+        if self._listener:
+            try:
+                self._listener.stop()
+            except:
+                pass
+            self._listener = None
+        self._is_running = False
+        print("⌨️  Master Hotkey Listener stopped")
+
+    def _on_key_press(self, key):
+        # Dispatch to all handlers
+        # We need a copy because handlers might modify the set during callback (unlikely but safe)
+        for handler in list(self._handlers):
+            try:
+                handler._on_key_press(key)
+            except Exception as e:
+                print(f"Error in hotkey handler press: {e}")
+
+    def _on_key_release(self, key):
+        for handler in list(self._handlers):
+            try:
+                handler._on_key_release(key)
+            except Exception as e:
+                print(f"Error in hotkey handler release: {e}")
+
+
 class PushToTalkHotkey:
     """
     Push-to-talk hotkey manager.
-    Calls on_press when hotkey is pressed, on_release when released.
+    Uses MasterHotkeyListener to share a single keyboard hook.
     """
     
     # Key name mappings for display
@@ -24,28 +94,12 @@ class PushToTalkHotkey:
         'space': 'Space',
     }
     
-    # Modifier key sets for detection
-    MODIFIER_KEYS = {
-        keyboard.Key.cmd, keyboard.Key.cmd_r,
-        keyboard.Key.ctrl, keyboard.Key.ctrl_r,
-        keyboard.Key.alt, keyboard.Key.alt_r,
-        keyboard.Key.shift, keyboard.Key.shift_r,
-    }
-    
     def __init__(
         self,
         hotkey: str,
         on_press: Callable[[], None],
         on_release: Callable[[], None]
     ):
-        """
-        Initialize push-to-talk hotkey.
-        
-        Args:
-            hotkey: Hotkey string (e.g., "<cmd>+<shift>+d")
-            on_press: Called when hotkey is pressed
-            on_release: Called when hotkey is released
-        """
         self.hotkey_string = hotkey
         self.on_press_callback = on_press
         self.on_release_callback = on_release
@@ -54,15 +108,14 @@ class PushToTalkHotkey:
         self._required_modifiers, self._main_key = self._parse_hotkey(hotkey)
         
         # State
-        self._listener: Optional[keyboard.Listener] = None
-        self._is_running = False
         self._is_pressed = False
         self._current_modifiers: Set[str] = set()
         self._lock = threading.Lock()
+        self._registered = False
     
     def _parse_hotkey(self, hotkey: str) -> tuple:
         """Parse hotkey string into modifiers and main key"""
-        parts = hotkey.lower().replace('<', '').replace('>', '').split('+')
+        parts = hotkey.lower().replace('<', '').replace('>', '').replace('command', 'cmd').replace('control', 'ctrl').split('+')
         modifiers = set()
         main_key = None
         
@@ -81,7 +134,6 @@ class PushToTalkHotkey:
             return key.char.lower()
         elif hasattr(key, 'name'):
             name = key.name.lower()
-            # Normalize left/right modifiers
             if name.endswith('_r') or name.endswith('_l'):
                 name = name[:-2]
             return name
@@ -92,37 +144,33 @@ class PushToTalkHotkey:
         return self._required_modifiers.issubset(self._current_modifiers)
     
     def _on_key_press(self, key) -> None:
-        """Handle key press event"""
+        """Handle key press event from master listener"""
         key_name = self._get_key_name(key)
         if not key_name:
             return
         
-        # Track modifier state
         if key_name in ('cmd', 'ctrl', 'alt', 'shift'):
             self._current_modifiers.add(key_name)
         
-        # Check if hotkey combo is pressed
         if key_name == self._main_key and self._check_modifiers():
             with self._lock:
                 if not self._is_pressed:
                     self._is_pressed = True
-                    print(f"🔥 HOTKEY PRESSED: {self.hotkey_string}")
+                    # print(f"🔥 HOTKEY PRESSED: {self.hotkey_string}")
                     try:
                         self.on_press_callback()
                     except Exception as e:
                         print(f"Hotkey press callback error: {e}")
     
     def _on_key_release(self, key) -> None:
-        """Handle key release event"""
+        """Handle key release event from master listener"""
         key_name = self._get_key_name(key)
         if not key_name:
             return
         
-        # Track modifier state
         if key_name in ('cmd', 'ctrl', 'alt', 'shift'):
             self._current_modifiers.discard(key_name)
         
-        # Check if main key or any required modifier was released
         should_release = False
         if key_name == self._main_key:
             should_release = True
@@ -133,43 +181,26 @@ class PushToTalkHotkey:
             with self._lock:
                 if self._is_pressed:
                     self._is_pressed = False
-                    print(f"🔥 HOTKEY RELEASED: {self.hotkey_string}")
+                    # print(f"🔥 HOTKEY RELEASED: {self.hotkey_string}")
                     try:
                         self.on_release_callback()
                     except Exception as e:
                         print(f"Hotkey release callback error: {e}")
     
     def start(self) -> None:
-        """Start listening for hotkey"""
-        with self._lock:
-            if self._is_running:
-                return
-            
-            try:
-                self._listener = keyboard.Listener(
-                    on_press=self._on_key_press,
-                    on_release=self._on_key_release
-                )
-                self._listener.start()
-                self._is_running = True
-                print(f"⌨️  Push-to-talk hotkey started: {self.get_display_string()}")
-                
-            except Exception as e:
-                print(f"Failed to start hotkey listener: {e}")
-                print("\n⚠️  Hotkeys require Input Monitoring permission!")
-                print("Add MWhisper to: System Settings → Privacy & Security → Input Monitoring")
-                raise
+        """Register with master listener"""
+        if not self._registered:
+            MasterHotkeyListener.get_instance().register(self)
+            self._registered = True
+            print(f"⌨️  Push-to-talk hotkey active: {self.get_display_string()}")
     
     def stop(self) -> None:
-        """Stop listening for hotkey"""
-        with self._lock:
-            if self._listener:
-                self._listener.stop()
-                self._listener = None
-            self._is_running = False
+        """Unregister from master listener"""
+        if self._registered:
+            MasterHotkeyListener.get_instance().unregister(self)
+            self._registered = False
             self._is_pressed = False
             self._current_modifiers.clear()
-            print(f"⌨️  Push-to-talk hotkey stopped: {self.get_display_string()}")
     
     def get_display_string(self) -> str:
         """Get human-readable hotkey string"""
@@ -186,8 +217,7 @@ class PushToTalkHotkey:
         return ''.join(display_parts)
     
     def is_running(self) -> bool:
-        """Check if hotkey listener is active"""
-        return self._is_running
+        return self._registered
 
 
 # Legacy class for backwards compatibility (used in change_hotkey)

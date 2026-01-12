@@ -83,6 +83,12 @@ def filter_fillers(text: str, enabled: bool = True) -> str:
     
     # Clean up multiple spaces and punctuation issues
     result = re.sub(r'\s+', ' ', result)  # Multiple spaces to one
+    
+    # Remove repeated subsequent words (e.g., "word word" -> "word")
+    # Matches a word boundary, a word (>=2 chars), whitespace, same word, word boundary
+    # Case insensitive
+    result = re.sub(r'\b(\w{2,})\s+(?=\1\b)', '', result, flags=re.IGNORECASE)
+    
     result = re.sub(r'\s+([,.!?])', r'\1', result)  # Space before punctuation
     result = re.sub(r'([,.!?])\s*([,.!?])', r'\1', result)  # Double punctuation
     result = re.sub(r'^\s*[,.]\s*', '', result)  # Leading comma/period

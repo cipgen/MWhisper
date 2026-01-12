@@ -12,11 +12,13 @@ import numpy as np
 from .audio_capture import AudioCapture, get_audio_level
 from .transcriber import Transcriber
 from .filler_filter import filter_fillers
-from .hotkeys import HotkeyManager
+from .hotkeys import HotkeyManager, PushToTalkHotkey
 from .text_inserter import TextInserter
 from .settings import Settings, get_settings
 from .history import DictationHistory, get_history
 from .menu_bar import MenuBarApp, create_menu_bar_app
+from .translator import Translator
+from .settings_window import show_settings_window
 
 
 def check_accessibility_permission() -> bool:
@@ -107,12 +109,16 @@ class MWhisperApp:
         # Components (lazy loaded)
         self._transcriber: Optional[Transcriber] = None
         self._audio_capture: Optional[AudioCapture] = None
-        self._hotkey_manager: Optional[HotkeyManager] = None
+        self._dictate_hotkey: Optional[PushToTalkHotkey] = None
+        self._translate_hotkey: Optional[PushToTalkHotkey] = None
+        self._hotkey_manager: Optional[HotkeyManager] = None  # For change_hotkey
         self._text_inserter: Optional[TextInserter] = None
         self._menu_app: Optional[MenuBarApp] = None
+        self._translator: Optional[Translator] = None
         
         # State
         self._is_recording = False
+        self._is_translate_recording = False
         self._recording_start_time = 0.0
         self._lock = threading.Lock()
     
@@ -146,6 +152,14 @@ class MWhisperApp:
                 self._stop_recording()
             else:
                 self._start_recording()
+    
+    def toggle_translate_recording(self) -> None:
+        """Toggle translate recording on/off"""
+        with self._lock:
+            if self._is_translate_recording:
+                self._stop_translate_recording()
+            else:
+                self._start_translate_recording()
     
     def _start_recording(self) -> None:
         """Start recording from microphone"""
@@ -189,6 +203,139 @@ class MWhisperApp:
             args=(audio_data, duration),
             daemon=True
         ).start()
+    
+    def _start_translate_recording(self) -> None:
+        """Start recording for translation"""
+        print("\n🌐 Starting translate recording...")
+        
+        self._is_translate_recording = True
+        self._recording_start_time = time.time()
+        
+        # Update UI
+        if self._menu_app:
+            self._menu_app.set_status(
+                MenuBarApp.STATUS_RECORDING,
+                "Recording for translation..."
+            )
+        
+        # Start audio capture
+        audio = self._ensure_audio_capture()
+        audio.start()
+    
+    def _stop_translate_recording(self) -> None:
+        """Stop recording and process for translation"""
+        print("⏹ Stopping translate recording...")
+        
+        # Get recorded audio
+        audio = self._ensure_audio_capture()
+        audio_data = audio.stop()
+        
+        duration = time.time() - self._recording_start_time
+        self._is_translate_recording = False
+        
+        # Update UI
+        if self._menu_app:
+            self._menu_app.set_status(
+                MenuBarApp.STATUS_PROCESSING,
+                "Translating..."
+            )
+        
+        # Process in background with translation
+        threading.Thread(
+            target=self._process_audio_for_translation,
+            args=(audio_data, duration),
+            daemon=True
+        ).start()
+    
+    def _process_audio_for_translation(self, audio_data: np.ndarray, duration: float) -> None:
+        """Process recorded audio and translate"""
+        try:
+            if len(audio_data) == 0:
+                print("No audio recorded")
+                self._on_translation_complete("", duration)
+                return
+            
+            # Check audio level
+            level = get_audio_level(audio_data)
+            if level < -50:
+                print(f"Audio too quiet: {level:.1f} dB")
+                self._on_translation_complete("", duration)
+                return
+            
+            print(f"Processing {len(audio_data)} samples ({duration:.1f}s)...")
+            
+            # Transcribe
+            transcriber = self._ensure_transcriber()
+            result = transcriber.transcribe(audio_data)
+            
+            text = result.get("text", "")
+            print(f"Transcription: {text}")
+            
+            # Filter filler words
+            if self.settings.filter_fillers:
+                text = filter_fillers(text)
+            
+            if not text:
+                self._on_translation_complete("", duration)
+                return
+            
+            # Translate via OpenAI
+            api_key = self.settings.get("openai_api_key", "")
+            if not api_key:
+                print("Error: OpenAI API key not configured")
+                if self._menu_app:
+                    self._menu_app.show_alert(
+                        "API Key Required",
+                        "Please set your OpenAI API key in Settings."
+                    )
+                self._on_translation_complete("", duration)
+                return
+            
+            prompt = self.settings.get("translation_prompt", "")
+            if self._translator is None:
+                self._translator = Translator(api_key, prompt)
+            
+            translated = self._translator.translate(text)
+            self._on_translation_complete(translated or "", duration)
+            
+        except Exception as e:
+            print(f"Translation processing error: {e}")
+            import traceback
+            traceback.print_exc()
+            self._on_translation_complete("", duration)
+    
+    def _on_translation_complete(self, text: str, duration: float) -> None:
+        """Handle translation completion"""
+        # Update UI
+        if self._menu_app:
+            self._menu_app.set_status(MenuBarApp.STATUS_IDLE, "Ready")
+        
+        if not text:
+            print("No translation to insert")
+            return
+        
+        # Add to history (Translation)
+        self.history.add(f"[EN] {text}", duration, "en")
+        
+        # Update history menu
+        if self._menu_app:
+            history_items = [str(e) for e in self.history.get_recent(10)]
+            self._menu_app.update_history_menu(history_items)
+        
+        # Insert translated text
+        print(f"Inserting translation: {text}")
+        inserter = self._ensure_text_inserter()
+        success = inserter.insert(text)
+        
+        if success:
+            print("✓ Translation inserted successfully")
+            if self._menu_app:
+                self._menu_app.show_notification(
+                    "MWhisper Translation",
+                    f"Inserted: {text[:50]}..."
+                )
+        else:
+            print("✗ Failed to insert translation")
     
     def _process_audio(self, audio_data: np.ndarray, duration: float) -> None:
         """Process recorded audio"""
@@ -274,22 +421,100 @@ class MWhisperApp:
     
     def _on_settings(self) -> None:
         """Handle settings menu click"""
-        # For now, show available microphones
-        audio = self._ensure_audio_capture()
-        devices = audio.get_devices()
+        # Launch settings GUI in a separate process
+        import subprocess
+        import sys
+        import os
         
-        device_list = "\n".join([
-            f"  {d['id']}: {d['name']}"
-            for d in devices
-        ])
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings_gui.py")
         
-        if self._menu_app:
-            self._menu_app.show_alert(
-                "Available Microphones",
-                f"Microphones:\n{device_list}\n\n"
-                f"Current: {self.settings.microphone_id or 'Default'}\n"
-                f"Hotkey: {self.settings.hotkey}"
+        def run_settings():
+            try:
+                # Use the same python interpreter (or app binary)
+                cmd = [sys.executable, "--settings"]
+                
+                # If running from source (not frozen), we need the script path ??
+                # Actually main.py handles it. If not frozen, sys.executable is python.
+                # If not frozen, we need: python main.py --settings
+                if not getattr(sys, 'frozen', False):
+                    main_script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py")
+                    cmd = [sys.executable, main_script, "--settings"]
+                
+                print(f"Launching settings with: {cmd}")
+                
+                process = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if process.returncode == 0:
+                    print("Settings saved, reloading...")
+                    # Schedule reload on main thread (actually this is a thread, so can call methods)
+                    # Use rumps timer or just direct call if thread-safe
+                    self._reload_settings()
+                else:
+                    if process.stderr:
+                        print(f"Settings error: {process.stderr}")
+            except Exception as e:
+                print(f"Failed to launch settings: {e}")
+        
+        # Run in thread to not block menu
+        threading.Thread(target=run_settings, daemon=True).start()
+
+    def _reload_settings(self) -> None:
+        """Reload settings from config file and update hotkeys"""
+        print("Reloading settings...")
+        self.settings.load()
+        
+        # Re-initialize hotkeys
+        # Stop existing
+        if self._dictate_hotkey:
+            self._dictate_hotkey.stop()
+        if self._translate_hotkey:
+            self._translate_hotkey.stop()
+            
+        # Start new
+        try:
+            # Dictation Hotkey
+            hotkey_str = self.settings.hotkey
+            self._dictate_hotkey = PushToTalkHotkey(
+                hotkey_str,
+                on_press=self._start_recording,
+                on_release=self._stop_recording
             )
+            self._dictate_hotkey.start()
+            
+            # Translate Hotkey
+            translate_hotkey_str = self.settings.get("translate_hotkey")
+            if translate_hotkey_str:
+                self._translate_hotkey = PushToTalkHotkey(
+                    translate_hotkey_str,
+                    on_press=self._start_translate_recording,
+                    on_release=self._stop_translate_recording
+                )
+                self._translate_hotkey.start()
+            
+            # Update menu display
+            if self._menu_app:
+                mapping = {
+                    '<cmd>': '⌘', '<cmd_r>': '⌘',
+                    '<shift>': '⇧', '<shift_r>': '⇧',
+                    '<ctrl>': '⌃', '<ctrl_r>': '⌃',
+                    '<alt>': '⌥', '<alt_r>': '⌥',
+                }
+                display = hotkey_str
+                for k, v in mapping.items():
+                    display = display.replace(k, v).replace('+', '')
+                display = display.upper()
+                
+                self._menu_app.set_hotkey_display(display)
+                self._menu_app.show_notification("MWhisper", "Settings reloaded successfully")
+                
+        except Exception as e:
+            print(f"Failed to apply new settings: {e}")
+            if self._menu_app:
+                self._menu_app.show_alert("Error", f"Failed to apply settings: {e}")
     
     def _on_quit(self) -> None:
         """Handle quit"""
@@ -370,12 +595,28 @@ class MWhisperApp:
             print(f"Warning: Could not load transcriber: {e}")
             print("Transcription will fail until model is loaded.")
         
-        # Setup hotkeys
+        # Setup dictation hotkey (push-to-talk)
+        self._dictate_hotkey = PushToTalkHotkey(
+            hotkey=self.settings.hotkey,
+            on_press=self._start_recording,
+            on_release=self._stop_recording
+        )
+        self._dictate_hotkey.start()
+        
+        # Setup translate hotkey (push-to-talk)
+        translate_hotkey = self.settings.get("translate_hotkey", "<cmd>+<shift>+u")
+        self._translate_hotkey = PushToTalkHotkey(
+            hotkey=translate_hotkey,
+            on_press=self._start_translate_recording,
+            on_release=self._stop_translate_recording
+        )
+        self._translate_hotkey.start()
+        
+        # Legacy hotkey manager for change_hotkey functionality
         self._hotkey_manager = HotkeyManager(
-            callback=self.toggle_recording,
+            callback=lambda: None,
             hotkey=self.settings.hotkey
         )
-        self._hotkey_manager.start()
         
         # Create menu bar app
         self._menu_app = create_menu_bar_app(
@@ -388,14 +629,16 @@ class MWhisperApp:
         
         # Set hotkey display
         self._menu_app.set_hotkey_display(
-            self._hotkey_manager.get_display_string()
+            self._dictate_hotkey.get_display_string()
         )
         
         # Update history menu
         history_items = [str(e) for e in self.history.get_recent(10)]
         self._menu_app.update_history_menu(history_items)
         
-        print(f"\n✓ Ready! Press {self._hotkey_manager.get_display_string()} to dictate")
+        print(f"\n✓ Ready! (Push-to-talk mode)")
+        print(f"  {self._dictate_hotkey.get_display_string()} — Hold to dictate")
+        print(f"  {self._translate_hotkey.get_display_string()} — Hold to dictate + translate")
         print("Click the menu bar icon for options.\n")
         
         # Run menu bar app (blocking)

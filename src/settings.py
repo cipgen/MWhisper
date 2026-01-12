@@ -12,6 +12,7 @@ from pathlib import Path
 # Default settings
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "hotkey": "<cmd>+<shift>+d",
+    "translate_hotkey": "<cmd>+<shift>+t",
     "microphone_id": None,
     "language": "auto",
     "filter_fillers": True,
@@ -20,6 +21,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "show_realtime_text": False,
     "insertion_method": "keystroke",  # "keystroke" or "clipboard"
     "sound_feedback": True,
+    # OpenAI settings
+    "openai_api_key": "",
+    "translation_prompt": "Переведи этот текст на английский язык. Исправь ошибки и напиши простыми словами. Верни ТОЛЬКО перевод, без пояснений.",
 }
 
 

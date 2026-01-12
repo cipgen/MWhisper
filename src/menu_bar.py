@@ -65,9 +65,9 @@ class MenuBarApp(rumps.App):
             app_dir = Path(__file__).parent.parent
             
         icons = {
-            "idle": app_dir / "assets" / "icon_idle.png",
-            "recording": app_dir / "assets" / "icon_active.png",
-            "processing": app_dir / "assets" / "icon_ready.png",
+            "idle": app_dir / "assets" / "menu_icon_idle.png",
+            "recording": app_dir / "assets" / "menu_icon_active.png",
+            "processing": app_dir / "assets" / "menu_icon_ready.png",
         }
         
         icon_path = icons.get(status, icons["idle"])
@@ -104,17 +104,14 @@ class MenuBarApp(rumps.App):
             callback=self._on_settings_click
         )
         
-        # Change Hotkey
-        self._change_hotkey_item = rumps.MenuItem(
-            "Change Hotkey...",
-            callback=self._on_change_hotkey_click
-        )
+
         
         # Quit
         quit_item = rumps.MenuItem("Quit MWhisper", callback=self._on_quit_click)
         
         # Version info (for debugging)
-        version_item = rumps.MenuItem("Build: 2026-01-11-v13")
+        # Version info (for debugging)
+        version_item = rumps.MenuItem("Build: v24-native")
         version_item.set_callback(None)
         
         # Build menu
@@ -125,7 +122,7 @@ class MenuBarApp(rumps.App):
             None,  # Separator
             self._history_menu,
             self._settings_item,
-            self._change_hotkey_item,
+
             None,  # Separator
             version_item,
             quit_item
@@ -147,16 +144,7 @@ class MenuBarApp(rumps.App):
                 ok="OK"
             )
     
-    def _on_change_hotkey_click(self, sender: rumps.MenuItem) -> None:
-        """Handle change hotkey click"""
-        if self._on_change_hotkey:
-            self._on_change_hotkey()
-        else:
-            rumps.alert(
-                title="Change Hotkey",
-                message="Press a new key combination when prompted.",
-                ok="OK"
-            )
+
     
     def _on_quit_click(self, sender: rumps.MenuItem) -> None:
         """Handle quit click"""

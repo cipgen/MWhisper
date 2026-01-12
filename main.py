@@ -36,6 +36,14 @@ except Exception as e:
 
 def main():
     """Main entry point"""
+    # Check arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--settings":
+            print("Launching Settings GUI...")
+            from src.settings_gui import run_settings
+            run_settings()
+            return
+
     print("Starting MWhisper...")
     run_app()
 

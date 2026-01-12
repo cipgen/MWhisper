@@ -17,3 +17,6 @@ rumps>=0.4.0
 # Text insertion & clipboard
 pyperclip>=1.8.2
 pyobjc-framework-Cocoa>=9.0
+
+# OpenAI translation
+openai>=1.0.0

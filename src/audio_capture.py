@@ -69,6 +69,12 @@ class AudioCapture:
         """
         import sounddevice as sd
         
+        # Force refresh of device list to pick up new defaults (e.g. headphones)
+        try:
+            sd.query_devices()
+        except Exception as e:
+            print(f"Warning: Failed to query devices: {e}")
+        
         self._on_audio_callback = on_audio
         self._audio_buffer = []
         
@@ -78,14 +84,43 @@ class AudioCapture:
         
         self._is_recording = True
         
-        self._stream = sd.InputStream(
-            device=self.device_id,
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype=np.float32,
-            blocksize=self.chunk_size,
-            callback=self._audio_callback
-        )
+        try:
+            # Try 1: Normal start
+            self._stream = sd.InputStream(
+                device=self.device_id,
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                dtype=np.float32,
+                blocksize=self.chunk_size,
+                callback=self._audio_callback
+            )
+        except Exception as e:
+            print(f"Warning: Stream start failed: {e}")
+            # Try 2: Force full refresh and explicit default device
+            print("Attempting to recover audio device...")
+            try:
+                sd.query_devices()
+                device_to_use = self.device_id
+                
+                # If using default (None), explicitly find the current default ID
+                if device_to_use is None:
+                    device_to_use = sd.default.device[0]
+                    print(f"Resolved default device to ID: {device_to_use}")
+                
+                self._stream = sd.InputStream(
+                    device=device_to_use,
+                    samplerate=self.sample_rate,
+                    channels=self.channels,
+                    dtype=np.float32,
+                    blocksize=self.chunk_size,
+                    callback=self._audio_callback
+                )
+                print("✓ Audio recovery successful")
+            except Exception as e2:
+                print(f"Critical: Audio recovery failed: {e2}")
+                self._is_recording = False
+                raise e2
+                
         self._stream.start()
         print("🎤 Recording started")
     

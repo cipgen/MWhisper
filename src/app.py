@@ -671,7 +671,8 @@ class MWhisperApp:
                 display = display.upper()
                 
                 self._menu_app.set_hotkey_display(display)
-                self._menu_app.show_notification("MWhisper", "Settings reloaded successfully")
+                # Notification removed as per user request (too many clicks)
+                # self._menu_app.show_notification("MWhisper", "Settings reloaded successfully")
                 
         except Exception as e:
             print(f"Failed to apply new settings: {e}")

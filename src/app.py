@@ -615,14 +615,18 @@ class MWhisperApp:
     def _reload_settings(self) -> None:
         """Reload settings from config file and update hotkeys"""
         print("Reloading settings...")
+        import time
+        time.sleep(0.5) # Wait for file flush
         self.settings.load()
+        print(f"DEBUG: Loaded hotkey: {self.settings.hotkey}")
         
-        # Re-initialize hotkeys
-        # Stop existing
         if self._dictate_hotkey:
+            print(f"Stopping old dictate hotkey: {self._dictate_hotkey.hotkey_string}")
             self._dictate_hotkey.stop()
         if self._translate_hotkey:
             self._translate_hotkey.stop()
+        
+        # Re-initialize hotkeys
             
         # Start new
         try:

@@ -9,15 +9,123 @@ import json
 import threading
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                                QLabel, QLineEdit, QPushButton, QCheckBox, 
-                               QMessageBox, QFrame, QSpacerItem, QSizePolicy, QDialog)
+                               QMessageBox, QFrame, QSpacerItem, QSizePolicy, QDialog,
+                               QPlainTextEdit, QScrollArea)
 from PySide6.QtCore import Qt, Signal, QObject, QSize
 from PySide6.QtGui import QFont, QIcon
-from pynput import keyboard
-
-# Add src to path to import local modules if needed
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 CONFIG_FILE = "config.json"
+
+# Dark Matte / Apple Matte Stylesheet
+STYLE_SHEET = """
+QWidget {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #E0E0E0;
+}
+
+/* Main Window */
+QWidget#SettingsWindow {
+    background-color: #262626; /* Dark Matte Gray */
+}
+QWidget#ContentWidget {
+    background-color: #262626;
+}
+
+/* Scroll Area */
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+QScrollBar:vertical {
+    background: #262626;
+    width: 10px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #4A4A4A;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+/* Typography */
+QLabel.SectionTitle {
+    color: #FFFFFF;
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 10px;
+    margin-bottom: 5px;
+}
+QLabel.FieldLabel {
+    color: #B0B0B0;
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+/* Inputs */
+QLineEdit, QPlainTextEdit {
+    background-color: #1A1A1A; /* Darker input background */
+    border: 1px solid #3A3A3A;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 13px;
+    color: #FFFFFF;
+    selection-background-color: #4A90E2;
+}
+QLineEdit:focus, QPlainTextEdit:focus {
+    background-color: #1A1A1A;
+    border: 1px solid #FFFFFF; /* White Glow */
+    /* Qt stylesheets don't support true box-shadow "glow" easily without graphics effects, 
+       but a white border simulates the high-contrast focus state of the mock. */
+}
+
+/* Hotkey Pills */
+QLineEdit.HotkeyDisplay {
+    background-color: #333333;
+    border: 1px solid #444444;
+    border-radius: 12px; /* Pill shape */
+    color: #E0E0E0;
+    font-weight: 600;
+    min-height: 24px;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: #3A3A3A;
+    border: 1px solid #4A4A4A;
+    border-radius: 5px;
+    padding: 5px 8px;
+    color: #E0E0E0;
+}
+QPushButton:hover {
+    background-color: #454545;
+}
+QPushButton:pressed {
+    background-color: #2A2A2A;
+}
+
+/* Primary Button (Save) */
+QPushButton#PrimaryButton {
+    background-color: #4A4A4A; /* Dark button as per mock, maybe slightly lighter */
+    border: 1px solid #5A5A5A;
+    color: #FFFFFF;
+    font-weight: 600;
+}
+QPushButton#PrimaryButton:hover {
+    background-color: #555555;
+}
+
+/* Cancel Button */
+QPushButton#CancelButton {
+    background-color: transparent;
+    border: none;
+    color: #A0A0A0;
+}
+QPushButton#CancelButton:hover {
+    color: #FFFFFF;
+}
+"""
 
 class HotkeyRecorderDialog(QDialog):
     hotkey_recorded = Signal(str)
@@ -25,33 +133,42 @@ class HotkeyRecorderDialog(QDialog):
     def __init__(self, parent=None, title="Record Hotkey"):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setFixedSize(400, 200)
+        self.setFixedSize(400, 220)
         self.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint | Qt.WindowTitleHint)
         self.setModal(True)
         
+        self.setStyleSheet(STYLE_SHEET)
+        
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(20)
         
-        self.lbl_instruction = QLabel("Press the desired key combination\non your keyboard now...")
+        self.lbl_instruction = QLabel("Press key combination...")
         self.lbl_instruction.setAlignment(Qt.AlignCenter)
-        self.lbl_instruction.setFont(QFont("System", 14))
+        self.lbl_instruction.setProperty("class", "SectionTitle")
+        self.lbl_instruction.setStyleSheet("color: #B0B0B0; font-size: 14px;")
         layout.addWidget(self.lbl_instruction)
         
         self.lbl_preview = QLabel("Waiting...")
         self.lbl_preview.setAlignment(Qt.AlignCenter)
-        self.lbl_preview.setFont(QFont("System", 18, QFont.Bold))
-        self.lbl_preview.setStyleSheet("color: #007AFF; padding: 10px; background: #E5F1FF; border-radius: 6px;")
+        self.lbl_preview.setFont(QFont("System", 24, QFont.Bold))
+        self.lbl_preview.setStyleSheet("""
+            color: #FFFFFF; 
+            padding: 15px; 
+            background: #1A1A1A; 
+            border: 1px solid #FFFFFF;
+            border-radius: 10px;
+        """)
         layout.addWidget(self.lbl_preview)
         
         btn_cancel = QPushButton("Cancel")
+        btn_cancel.setObjectName("CancelButton")
+        btn_cancel.setCursor(Qt.PointingHandCursor)
         btn_cancel.clicked.connect(self.reject)
         layout.addWidget(btn_cancel)
         
         self.setLayout(layout)
         self.current_modifiers = set()
-        
-        # Focus policy to ensure we grab keys
         self.setFocusPolicy(Qt.StrongFocus)
 
     def showEvent(self, event):
@@ -63,67 +180,50 @@ class HotkeyRecorderDialog(QDialog):
         key = event.key()
         modifiers = event.modifiers()
         
-        # Ignore isolated modifiers press (wait for combo)
-        # But we need to update preview
-        
         pynput_mods = []
         if modifiers & Qt.ControlModifier: pynput_mods.append("<cmd>")
         if modifiers & Qt.MetaModifier: pynput_mods.append("<ctrl>")
         if modifiers & Qt.AltModifier: pynput_mods.append("<alt>")
         if modifiers & Qt.ShiftModifier: pynput_mods.append("<shift>")
         
-        # Determine main key
-        # Qt.Key mapping to pynput string char
         main_key = ""
-        
-        # Don't capture valid modifiers as main keys
         is_mod_key = key in (Qt.Key_Control, Qt.Key_Meta, Qt.Key_Alt, Qt.Key_Shift, Qt.Key_AltGr)
         
         if not is_mod_key:
-            if 0x20 <= key <= 0x7E: # Visible ASCII
+            if 0x20 <= key <= 0x7E:
                 text = event.text()
                 if text:
                     main_key = text.lower()
                 else:
-                    # Fallback for keys without text (e.g. F-keys, special)
                     import QKeySequence
                     main_key = QKeySequence(key).toString().lower()
             else:
-                 # Handle special keys if needed (F1, Escape, etc)
-                 # MWhisper seems to focus on simple letter combos.
-                 # Let's try to get text().
                  text = event.text()
                  if text: main_key = text.lower()
         
         self.current_modifiers = set(pynput_mods)
         
-        # Update Preview
         if main_key:
             display_str = "+".join(sorted(pynput_mods) + [main_key])
             self.lbl_preview.setText(display_str)
-            
-            # If we have at least one modifier and a key, or just a key?
-            # MWhisper logic usually expects <mod>+key.
-            # But let's allow single keys if user wants (though usually bad).
-            
-            # Commit logic: If we have main_key, we save.
-            hotkey_str = display_str # Already in format <ctrl>+<shift>+d
+            hotkey_str = display_str
             self.hotkey_recorded.emit(hotkey_str)
             self.accept()
         else:
-            # Just showing modifiers
             display_str = "+".join(sorted(pynput_mods)) + "..."
             self.lbl_preview.setText(display_str)
 
     def keyReleaseEvent(self, event):
-        # Update preview on release if needed?
         pass
 
 class SettingsWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MWhisper Settings")
-        self.setFixedSize(500, 600) # Increased height for prompt area
+        self.setObjectName("SettingsWindow")
+        self.setFixedSize(520, 580) # Slightly wider, same height, no scroll needed
+        
+        self.setStyleSheet(STYLE_SHEET)
         
         self.config = self._load_config()
         self._setup_ui()
@@ -149,122 +249,133 @@ class SettingsWindow(QWidget):
         try:
             self.config["openai_api_key"] = self.api_key_input.text().strip()
             self.config["translation_prompt"] = self.prompt_input.toPlainText().strip()
+            self.config["fix_prompt"] = self.fix_prompt_input.toPlainText().strip()
+            
             config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", CONFIG_FILE)
             with open(config_path, 'w') as f:
                 json.dump(self.config, f, indent=4)
-            QMessageBox.information(self, "Success", "Settings saved successfully!\nMWhisper will reload settings.")
+            # No notification as requested by user
             QApplication.quit()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
 
     def _setup_ui(self):
-        # Main layout for the window
+        # Main layout - NO SCROLL AREA
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(25, 25, 25, 25)
+        main_layout.setSpacing(12)
         
-        # Scroll Area
-        from PySide6.QtWidgets import QScrollArea
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        
-        # Widget to hold the form
-        content_widget = QWidget()
-        layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(25, 25, 25, 25)
-        layout.setSpacing(15)
-        
-        # OpenAI
+        # --- Section 1: OpenAI ---
         lbl_openai = QLabel("OpenAI Configuration")
-        lbl_openai.setFont(QFont("System", 14, QFont.Bold))
-        layout.addWidget(lbl_openai)
+        lbl_openai.setProperty("class", "SectionTitle")
+        main_layout.addWidget(lbl_openai)
         
-        layout.addWidget(QLabel("API Key:"))
+        lbl_key = QLabel("API Key")
+        lbl_key.setProperty("class", "FieldLabel")
+        main_layout.addWidget(lbl_key)
+        
+        key_input_container = QHBoxLayout()
         self.api_key_input = QLineEdit(self.config.get("openai_api_key", ""))
         self.api_key_input.setEchoMode(QLineEdit.Password)
         self.api_key_input.setPlaceholderText("sk-...")
-        layout.addWidget(self.api_key_input)
+        key_input_container.addWidget(self.api_key_input)
         
-        self.chk_show_key = QCheckBox("Show API Key")
+        self.chk_show_key = QCheckBox("Show")
+        self.chk_show_key.setCursor(Qt.PointingHandCursor)
         self.chk_show_key.stateChanged.connect(self._toggle_show_key)
-        layout.addWidget(self.chk_show_key)
-
-        # Translation Prompt
-        layout.addWidget(QLabel("System Prompt (Translation):"))
-        default_trans_prompt = (
-            "Переведи этот текст на английский язык. "
-            "Исправь ошибки и напиши простыми словами. "
-            "Верни ТОЛЬКО перевод, без пояснений."
-        )
-        current_trans_prompt = self.config.get("translation_prompt", default_trans_prompt)
-        from PySide6.QtWidgets import QPlainTextEdit
-        self.prompt_input = QPlainTextEdit(current_trans_prompt)
-        self.prompt_input.setPlaceholderText("Instructions for Translation...")
-        self.prompt_input.setFixedHeight(80)
-        self.prompt_input.setStyleSheet("background: #fdfdfd; color: #111111;")
-        layout.addWidget(self.prompt_input)
+        key_input_container.addWidget(self.chk_show_key)
         
-        # Smart Fix Prompt
-        layout.addWidget(QLabel("System Prompt (Smart Fix):"))
-        default_fix_prompt = (
-            "Исправь грамматические ошибки, расставь знаки препинания и улучши стиль. "
-            "Не переводи. Сохрани оригинальный язык. "
-            "Верни ТОЛЬКО исправленный текст."
-        )
-        current_fix_prompt = self.config.get("fix_prompt", default_fix_prompt)
-        self.fix_prompt_input = QPlainTextEdit(current_fix_prompt)
-        self.fix_prompt_input.setPlaceholderText("Instructions for Grammar/Style Fix...")
-        self.fix_prompt_input.setFixedHeight(80)
-        self.fix_prompt_input.setStyleSheet("background: #fdfdfd; color: #111111;")
-        layout.addWidget(self.fix_prompt_input)
+        main_layout.addLayout(key_input_container)
         
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(line)
+        main_layout.addSpacing(5)
         
-        # Hotkeys
-        lbl_hotkeys = QLabel("Hotkeys (Push-to-Talk)")
-        lbl_hotkeys.setFont(QFont("System", 14, QFont.Bold))
-        layout.addWidget(lbl_hotkeys)
+        # --- Section 2: Prompts ---
         
-        # Helper to create hotkey row
+        # Translation
+        trans_lbl = QLabel("Translation Prompt")
+        trans_lbl.setProperty("class", "FieldLabel")
+        main_layout.addWidget(trans_lbl)
+        
+        default_trans = "Переведи этот текст на английский язык. Исправь ошибки и напиши простыми словами. Верни ТОЛЬКО перевод."
+        current_trans = self.config.get("translation_prompt", default_trans)
+        self.prompt_input = QPlainTextEdit(current_trans)
+        self.prompt_input.setPlaceholderText("Enter your translation instructions here...")
+        self.prompt_input.setFixedHeight(50) # Very compact
+        main_layout.addWidget(self.prompt_input)
+        
+        # Smart Fix
+        fix_lbl = QLabel("Smart Fix Prompt")
+        fix_lbl.setProperty("class", "FieldLabel")
+        main_layout.addWidget(fix_lbl)
+        
+        default_fix = "Исправь грамматические ошибки, расставь знаки препинания и улучши стиль. Не переводи. Верни ТОЛЬКО исправленный текст."
+        current_fix = self.config.get("fix_prompt", default_fix)
+        self.fix_prompt_input = QPlainTextEdit(current_fix)
+        self.fix_prompt_input.setPlaceholderText("Enter instructions for grammar and style fixes...")
+        self.fix_prompt_input.setFixedHeight(50) # Very compact
+        main_layout.addWidget(self.fix_prompt_input)
+        
+        main_layout.addSpacing(10)
+        
+        # --- Section 3: Hotkeys ---
+        lbl_hk = QLabel("Hotkeys (Push-to-Talk)")
+        lbl_hk.setProperty("class", "SectionTitle")
+        main_layout.addWidget(lbl_hk)
+        
         def add_hotkey_row(label, key, config_key, default_val):
-            h_layout = QHBoxLayout()
-            h_layout.addWidget(QLabel(label, minimumWidth=80))
+            row = QHBoxLayout()
+            lbl = QLabel(label)
+            lbl.setMinimumWidth(100) 
+            lbl.setProperty("class", "FieldLabel")
+            row.addWidget(lbl)
             
-            edit = QLineEdit(self._get_display_hotkey(self.config.get(config_key, default_val)))
+            row.addStretch()
+            
+            val = self.config.get(config_key, default_val)
+            display = self._get_display_hotkey(val)
+            
+            edit = QLineEdit(display)
             edit.setReadOnly(True)
             edit.setAlignment(Qt.AlignCenter)
-            edit.setStyleSheet("QLineEdit { background: #f0f0f0; color: #333; font-weight: bold; }")
-            h_layout.addWidget(edit)
+            edit.setProperty("class", "HotkeyDisplay")
+            edit.setFixedWidth(100) # Give it space
+            edit.setFocusPolicy(Qt.NoFocus)
+            row.addWidget(edit)
+            
+            # WIDER GAP
+            row.addSpacing(10)
             
             btn = QPushButton("Change")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedWidth(75) # Wider button for "Change" text
             btn.clicked.connect(lambda: self._open_recorder(key))
-            h_layout.addWidget(btn)
-            layout.addLayout(h_layout)
+            row.addWidget(btn)
+            
+            main_layout.addLayout(row)
             return edit
 
-        self.edit_dictation = add_hotkey_row("Dictation:", "dictation", "hotkey", "<cmd>+<shift>+d")
-        self.edit_translate = add_hotkey_row("Translate:", "translate", "translate_hotkey", "<cmd>+<shift>+u")
-        self.edit_fix = add_hotkey_row("Smart Fix:", "fix", "fix_hotkey", "<cmd>+<shift>+e")
+        self.edit_dictation = add_hotkey_row("Dictation", "dictation", "hotkey", "<cmd>+<shift>+d")
+        self.edit_translate = add_hotkey_row("Translation", "translate", "translate_hotkey", "<cmd>+<shift>+u")
+        self.edit_fix = add_hotkey_row("Smart Fix", "fix", "fix_hotkey", "<cmd>+<shift>+e")
         
-        layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        main_layout.addStretch()
         
-        # Set scroll widget
-        scroll.setWidget(content_widget)
-        main_layout.addWidget(scroll)
-        
-        # Buttons area (outside scroll)
+        # --- Bottom Bar ---
         btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(20, 10, 20, 20)
+        btn_layout.setContentsMargins(0, 10, 0, 0)
         btn_layout.addStretch()
+        
         btn_cancel = QPushButton("Cancel")
+        btn_cancel.setObjectName("CancelButton")
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setFixedWidth(80)
         btn_cancel.clicked.connect(QApplication.quit)
         btn_layout.addWidget(btn_cancel)
         
         btn_save = QPushButton("Save Settings")
-        btn_save.setDefault(True)
+        btn_save.setObjectName("PrimaryButton")
+        btn_save.setCursor(Qt.PointingHandCursor)
+        btn_save.setFixedHeight(32)
         btn_save.clicked.connect(self._save_config)
         btn_layout.addWidget(btn_save)
         
@@ -292,11 +403,6 @@ class SettingsWindow(QWidget):
 
     def _open_recorder(self, target_type):
         dialog = HotkeyRecorderDialog(self, f"Set {target_type.title()} Hotkey")
-        # We need a slot to handle signal, or just check result after exec?
-        # exec() blocks until closed.
-        
-        # But wait, dialog uses threading for pynput.
-        # We need to ensure we get the result.
         
         current_hotkey = ""
         def on_recorded(hk):

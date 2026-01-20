@@ -9,6 +9,58 @@ import threading
 import subprocess
 
 
+# Virtual Key Code Map for macOS (QWERTY Physical -> VK Code)
+VK_MAP = {
+    'a': 0, 's': 1, 'd': 2, 'f': 3, 'h': 4, 'g': 5, 'z': 6, 'x': 7, 'c': 8, 'v': 9,
+    'b': 11, 'q': 12, 'w': 13, 'e': 14, 'r': 15, 'y': 16, 't': 17, '1': 18, '2': 19,
+    '3': 20, '4': 21, '6': 22, '5': 23, '=': 24, '9': 25, '7': 26, '-': 27, '8': 28,
+    '0': 29, ']': 30, 'o': 31, 'u': 32, '[': 33, 'i': 34, 'p': 35, 'l': 37, 'j': 38,
+    "'": 39, 'k': 40, ';': 41, '\\': 42, ',': 43, '/': 44, 'n': 45, 'm': 46, '.': 47,
+    '`': 50, 'space': 49, '±': 10, '§': 10
+}
+
+# Layout mapping for normalization (Fallback)
+LAYOUT_MAP = {
+    'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'y', 'г': 'u', 'ш': 'i', 'щ': 'o', 'з': 'p', 'х': '[', 'ъ': ']',
+    'ф': 'a', 'ы': 's', 'в': 'd', 'а': 'f', 'п': 'g', 'р': 'h', 'о': 'j', 'л': 'k', 'д': 'l', 'ж': ';', 'э': "'",
+    'я': 'z', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n', 'ь': 'm', 'б': ',', 'ю': '.', 'ё': '`',
+    'і': 's', 'ї': ']', 'є': "'", 'ґ': '\\'
+}
+
+# Reverse mapping for robust key name resolution (VK -> QWERTY char)
+VK_TO_CHAR = {v: k for k, v in VK_MAP.items()}
+
+def get_safe_key_name(key) -> Optional[str]:
+    """
+    Get normalized key name using robust strategy (VK -> Char -> Name).
+    This function is CRASH-PROOF for Ukrainian/International layouts.
+    """
+    # 1. Check valid VK (Physical) - Primary Source of Truth
+    if hasattr(key, 'vk') and key.vk in VK_TO_CHAR:
+        return VK_TO_CHAR[key.vk]
+        
+    # 2. Check explicitly handled modifiers/specials (pynput standard names)
+    if hasattr(key, 'name'):
+        name = key.name.lower()
+        if name.endswith('_r') or name.endswith('_l'):
+             name = name[:-2]
+        return name
+        
+    # 3. Fallback to char (Risky on some layouts, so wrap in try/except)
+    try:
+        if hasattr(key, 'char') and key.char:
+            char = key.char.lower()
+            # Normalize via LAYOUT_MAP just in case we ended up here
+            if char in LAYOUT_MAP:
+                return LAYOUT_MAP[char]
+            return char
+    except Exception:
+        # If getting char crashes (pynput issue with certain layouts), return None
+        pass
+        
+    return None
+
+
 class MasterHotkeyListener:
     """
     Singleton listener that dispatches key events to registered hotkey handlers.
@@ -95,42 +147,10 @@ class PushToTalkHotkey:
         'space': 'Space',
     }
     
-    def __init__(
-        self,
-        hotkey: str,
-        on_press: Callable[[], None],
-        on_release: Callable[[], None]
-    ):
-        self.hotkey_string = hotkey
-        self.on_press_callback = on_press
-        self.on_release_callback = on_release
-        
-        # Parse hotkey
-        self._required_modifiers, self._main_key = self._parse_hotkey(hotkey)
-        
-        # State
-        self._is_pressed = False
-        self._current_modifiers: Set[str] = set()
-    # Virtual Key Code Map for macOS (QWERTY Physical -> VK Code)
-    VK_MAP = {
-        'a': 0, 's': 1, 'd': 2, 'f': 3, 'h': 4, 'g': 5, 'z': 6, 'x': 7, 'c': 8, 'v': 9,
-        'b': 11, 'q': 12, 'w': 13, 'e': 14, 'r': 15, 'y': 16, 't': 17, '1': 18, '2': 19,
-        '3': 20, '4': 21, '6': 22, '5': 23, '=': 24, '9': 25, '7': 26, '-': 27, '8': 28,
-        '0': 29, ']': 30, 'o': 31, 'u': 32, '[': 33, 'i': 34, 'p': 35, 'l': 37, 'j': 38,
-        "'": 39, 'k': 40, ';': 41, '\\': 42, ',': 43, '/': 44, 'n': 45, 'm': 46, '.': 47,
-        '`': 50, 'space': 49, '§': 10, '±': 10
-    }
-    
-    # Layout mapping for normalization (Fallback)
-    LAYOUT_MAP = {
-        'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'y', 'г': 'u', 'ш': 'i', 'щ': 'o', 'з': 'p', 'х': '[', 'ъ': ']',
-        'ф': 'a', 'ы': 's', 'в': 'd', 'а': 'f', 'п': 'g', 'р': 'h', 'о': 'j', 'л': 'k', 'д': 'l', 'ж': ';', 'э': "'",
-        'я': 'z', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n', 'ь': 'm', 'б': ',', 'ю': '.', 'ё': '`',
-        'і': 's', 'ї': ']', 'є': "'", 'ґ': '\\'
-    }
-
-    # Reverse mapping for robust key name resolution (VK -> QWERTY char)
-    VK_TO_CHAR = {v: k for k, v in VK_MAP.items()}
+    # Expose maps via class used by instances, but they refer to module globals now
+    VK_MAP = VK_MAP
+    LAYOUT_MAP = LAYOUT_MAP
+    VK_TO_CHAR = VK_TO_CHAR
 
     def __init__(
         self,
@@ -172,55 +192,41 @@ class PushToTalkHotkey:
         return modifiers, main_key
     
     def _get_key_name(self, key) -> Optional[str]:
-        """Get normalized key name using VK code primarily"""
-        # Strategy: Rely on VK code to identify the key physically (Layout Independent)
-        # Only fallback to char/name if VK is unknown
-        
-        # 1. Check valid VK
-        if hasattr(key, 'vk') and key.vk in self.VK_TO_CHAR:
-            return self.VK_TO_CHAR[key.vk]
-            
-        # 2. Check explicitly handled modifiers/specials
-        if hasattr(key, 'name'):
-            name = key.name.lower()
-            if name.endswith('_r') or name.endswith('_l'):
-                name = name[:-2]
-            return name
-            
-        # 3. Fallback to char (Risky on some layouts, so wrap in try/except)
-        try:
-            if hasattr(key, 'char') and key.char:
-                char = key.char.lower()
-                # Normalize via LAYOUT_MAP just in case we ended up here
-                if char in self.LAYOUT_MAP:
-                    return self.LAYOUT_MAP[char]
-                return char
-        except Exception:
-            pass
-            
-        return None
+        """Delegate to global safe resolver"""
+        return get_safe_key_name(key)
     
     def _check_modifiers(self) -> bool:
         """Check if all required modifiers are currently pressed"""
         return self._required_modifiers.issubset(self._current_modifiers)
     
     def _matches_main_key(self, key, key_name) -> bool:
-        """Check if key matches configured main key (using VK or char)"""
-        # Priority 1: Check Virtual Key Code (Physical Position)
+        """Check if key matches configured main key (using robust multi-strategy)"""
+        
+        # Strategy 1: Check Virtual Key Code (Physical Position)
         if self._main_key_vk is not None and hasattr(key, 'vk') and key.vk is not None:
              if key.vk == self._main_key_vk:
                  return True
         
-        # Priority 2: Check Normalized Char
-        if key_name == self._main_key:
+        # Strategy 2: Check Actual Character (Safe Access) - Fix for ISO Backtick/Section mismatch
+        try:
+            if hasattr(key, 'char') and key.char:
+                char = key.char.lower()
+                if char == self._main_key:
+                    return True
+                if char in self.LAYOUT_MAP and self.LAYOUT_MAP[char] == self._main_key:
+                    return True
+        except Exception:
+            pass
+            
+        # Strategy 3: Check Resolved Key Name (Fallback)
+        if key_name and key_name == self._main_key:
             return True
             
         return False
     
     def _on_key_press(self, key) -> None:
         """Handle key press event from master listener"""
-        # 1. Check for Modifiers (Safe check, no char access)
-        # pynput sends Key.cmd, Key.shift etc which are safe
+        # 1. Modifiers
         is_modifier = False
         key_name = None
         
@@ -234,26 +240,15 @@ class PushToTalkHotkey:
             self._current_modifiers.add(key_name)
             return
 
-        # 2. Key Check (VK based first, safe)
-        if self._main_key_vk is not None and hasattr(key, 'vk') and key.vk == self._main_key_vk:
-             # Matched via VK!
-             if self._check_modifiers():
-                 self._trigger_press()
-             return
-
-        # 3. Fallback Key Name Check (Only if VK didn't match)
-        # We try to resolve name safely for checking against config char
-        try:
-             # Only call this if we really have to
-             safe_name = self._get_key_name(key)
-             if safe_name == self._main_key and self._check_modifiers():
-                 self._trigger_press()
-        except Exception:
-             # If getting name crashes (e.g. UA layout bad char), just ignore.
-             pass
+        # 2. Key Check (Robust Match)
+        safe_name = get_safe_key_name(key)
+            
+        if self._matches_main_key(key, safe_name) and self._check_modifiers():
+             self._trigger_press()
 
     def _trigger_press(self):
         with self._lock:
+            # Debounce
             if not self._is_pressed:
                 self._is_pressed = True
                 print(f"🔥 HOTKEY PRESSED: {self.hotkey_string}")
@@ -264,7 +259,6 @@ class PushToTalkHotkey:
 
     def _on_key_release(self, key) -> None:
         """Handle key release event from master listener"""
-        # 1. Modifiers
         is_modifier = False
         key_name = None
         if hasattr(key, 'name'):
@@ -278,24 +272,12 @@ class PushToTalkHotkey:
             
         should_release = False
         
-        # 2. Main Key Check (VK)
-        if self._main_key_vk is not None and hasattr(key, 'vk') and key.vk == self._main_key_vk:
-             should_release = True
+        # Resolve Safe
+        safe_name = get_safe_key_name(key)
         
-        # 3. Main Key Check (Name Fallback)
-        elif not should_release:
-             try:
-                 safe_name = self._get_key_name(key)
-                 if safe_name == self._main_key:
-                     should_release = True
-             except Exception:
-                 pass
-                 
-        # 4. Modifiers released check
-        # This is tricky without knowing the key name if _get_key_name fails.
-        # But generally, if we released a modifier, we already updated self._current_modifiers
-        # So we just check if modifiers are still valid?
-        # Actually, standard logic is: If modifier required for hotkey is released, stop hotkey.
+        if self._matches_main_key(key, safe_name):
+             should_release = True
+             
         if not self._check_modifiers():
             should_release = True
             
@@ -361,11 +343,10 @@ class HotkeyManager:
     def start(self) -> None:
         if self._is_running:
             return
-        # For legacy mode, callback is only on release (like toggle but PTT)
         self._ptt = PushToTalkHotkey(
             hotkey=self.hotkey_string,
             on_press=lambda: None,  # No action on press
-            on_release=self.callback  # Action on release
+            on_release=self.callback
         )
         self._ptt.start()
         self._is_running = True
@@ -399,7 +380,7 @@ class HotkeyManager:
             self.start()
     
     def capture_hotkey(self, callback: Callable[[str, str], None], timeout: float = 10.0) -> None:
-        """Capture a new hotkey combination from user input"""
+        """Capture a new hotkey combination from user input (SAFE & ROBUST)"""
         import time
         
         captured_modifiers: Set[str] = set()
@@ -410,6 +391,7 @@ class HotkeyManager:
             nonlocal main_key, captured_modifiers
             
             try:
+                # 1. Modifiers
                 if hasattr(key, 'name'):
                     key_name = key.name
                     if key_name in ('cmd', 'ctrl', 'alt', 'shift', 'cmd_r', 'ctrl_r', 'alt_r', 'shift_r'):
@@ -417,15 +399,15 @@ class HotkeyManager:
                         captured_modifiers.add(mod)
                         return
                 
-                if hasattr(key, 'char') and key.char:
-                    main_key = key.char.lower()
-                elif hasattr(key, 'name'):
-                    main_key = key.name.lower()
+                # 2. Main Key using SAFE Resolver
+                safe_name = get_safe_key_name(key)
                 
-                if main_key and captured_modifiers:
-                    capture_done.set()
-                    return False
-                    
+                if safe_name:
+                    main_key = safe_name
+                    if captured_modifiers:
+                        capture_done.set()
+                        return False # Stop listener
+                        
             except Exception as e:
                 print(f"Key capture error: {e}")
         

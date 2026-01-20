@@ -43,6 +43,58 @@ class AudioCapture:
         # Callback for real-time processing
         self._on_audio_callback: Optional[Callable[[np.ndarray], None]] = None
     
+    def _resolve_device_id(self) -> Optional[int]:
+        """
+        Resolve and validate the device ID before starting recording.
+        
+        When audio devices are connected/disconnected, device IDs can shift.
+        This method validates the saved device_id is still valid, and falls
+        back to the system default if not.
+        
+        Returns:
+            Valid device ID to use, or None for system default
+        """
+        import sounddevice as sd
+        
+        # Refresh device list
+        try:
+            sd.query_devices()
+        except Exception as e:
+            print(f"Warning: Failed to query devices: {e}")
+            return self.device_id
+        
+        # If no specific device set, use system default
+        if self.device_id is None:
+            return None
+        
+        # Validate the saved device_id still exists and is an input device
+        try:
+            devices = sd.query_devices()
+            if self.device_id < len(devices):
+                dev = devices[self.device_id]
+                if dev['max_input_channels'] > 0:
+                    # Device ID is valid and is an input device
+                    print(f"✓ Using saved device {self.device_id}: {dev['name']}")
+                    return self.device_id
+                else:
+                    print(f"⚠ Device {self.device_id} is not an input device, using default")
+            else:
+                print(f"⚠ Device ID {self.device_id} no longer exists, using default")
+        except Exception as e:
+            print(f"Warning: Device validation failed: {e}")
+        
+        # Fall back to system default
+        try:
+            default_id = sd.default.device[0]
+            if default_id is not None:
+                dev_name = sd.query_devices(default_id)['name']
+                print(f"↪ Falling back to default device {default_id}: {dev_name}")
+                return default_id
+        except Exception as e:
+            print(f"Warning: Could not get default device: {e}")
+        
+        return None
+    
     def _audio_callback(self, indata, frames, time_info, status):
         """Callback for sounddevice stream"""
         if status:
@@ -69,12 +121,6 @@ class AudioCapture:
         """
         import sounddevice as sd
         
-        # Force refresh of device list to pick up new defaults (e.g. headphones)
-        try:
-            sd.query_devices()
-        except Exception as e:
-            print(f"Warning: Failed to query devices: {e}")
-        
         self._on_audio_callback = on_audio
         self._audio_buffer = []
         
@@ -84,10 +130,12 @@ class AudioCapture:
         
         self._is_recording = True
         
+        # Dynamically resolve the device ID (handles hot-plug scenarios)
+        resolved_device = self._resolve_device_id()
+        
         try:
-            # Try 1: Normal start
             self._stream = sd.InputStream(
-                device=self.device_id,
+                device=resolved_device,
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 dtype=np.float32,
@@ -95,20 +143,16 @@ class AudioCapture:
                 callback=self._audio_callback
             )
         except Exception as e:
-            print(f"Warning: Stream start failed: {e}")
-            # Try 2: Force full refresh and explicit default device
-            print("Attempting to recover audio device...")
+            print(f"Warning: Stream start failed with device {resolved_device}: {e}")
+            # Try with system default as last resort
+            print("Attempting to use system default device...")
             try:
                 sd.query_devices()
-                device_to_use = self.device_id
-                
-                # If using default (None), explicitly find the current default ID
-                if device_to_use is None:
-                    device_to_use = sd.default.device[0]
-                    print(f"Resolved default device to ID: {device_to_use}")
+                default_id = sd.default.device[0]
+                print(f"Using fallback default device: {default_id}")
                 
                 self._stream = sd.InputStream(
-                    device=device_to_use,
+                    device=default_id,
                     samplerate=self.sample_rate,
                     channels=self.channels,
                     dtype=np.float32,
@@ -123,6 +167,7 @@ class AudioCapture:
                 
         self._stream.start()
         print("🎤 Recording started")
+
     
     def stop(self) -> np.ndarray:
         """

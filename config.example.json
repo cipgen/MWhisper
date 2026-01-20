@@ -1,0 +1,12 @@
+{
+    "hotkey": "<cmd>+<shift>+d",
+    "translate_hotkey": "<cmd>+<shift>+t",
+    "microphone_id": null,
+    "language": "auto",
+    "filter_fillers": true,
+    "history_size": 20,
+    "auto_start": false,
+    "show_realtime_text": false,
+    "openai_api_key": "",
+    "translation_prompt": "Translate this text to English. Fix errors and use simple words. Return ONLY the translation."
+}

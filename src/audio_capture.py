@@ -130,6 +130,18 @@ class AudioCapture:
         
         self._is_recording = True
         
+        # CRITICAL: Force PortAudio backend reset to handle sleep/wake and device changes
+        # Without this, the stream may capture from a stale/invalid device after:
+        # - Laptop lid close/open
+        # - Bluetooth headphones connect/disconnect
+        # - USB audio device plug/unplug
+        try:
+            sd._terminate()
+            sd._initialize()
+            print("✓ Audio backend reset")
+        except Exception as e:
+            print(f"Warning: Audio backend reset failed: {e}")
+        
         # Dynamically resolve the device ID (handles hot-plug scenarios)
         resolved_device = self._resolve_device_id()
         

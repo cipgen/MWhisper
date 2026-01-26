@@ -11,6 +11,7 @@ import numpy as np
 
 from .audio_capture import AudioCapture, get_audio_level
 from .transcriber import Transcriber
+from .streaming_transcriber import StreamingTranscriber
 from .filler_filter import filter_fillers
 from .hotkeys import HotkeyManager, PushToTalkHotkey
 from .text_inserter import TextInserter
@@ -108,6 +109,7 @@ class MWhisperApp:
         
         # Components (lazy loaded)
         self._transcriber: Optional[Transcriber] = None
+        self._streaming_transcriber: Optional[StreamingTranscriber] = None
         self._audio_capture: Optional[AudioCapture] = None
         self._dictate_hotkey: Optional[PushToTalkHotkey] = None
         self._translate_hotkey: Optional[PushToTalkHotkey] = None
@@ -125,15 +127,30 @@ class MWhisperApp:
         self._is_recording = False
         self._is_translate_recording = False
         self._is_fix_recording = False
+        self._is_streaming = False  # For streaming mode
         self._recording_start_time = 0.0
         self._lock = threading.Lock()
     
+    def _get_transcription_mode(self) -> str:
+        """Get current transcription mode from settings"""
+        return self.settings.get("transcription_mode", "parakeet")
+    
     def _ensure_transcriber(self) -> Transcriber:
-        """Lazy load transcriber"""
+        """Lazy load transcriber (parakeet mode)"""
         if self._transcriber is None:
             print("Loading Parakeet-MLX model...")
             self._transcriber = Transcriber(language=self.settings.language)
         return self._transcriber
+    
+    def _ensure_streaming_transcriber(self) -> StreamingTranscriber:
+        """Lazy load streaming transcriber (whisper.cpp mode)"""
+        if self._streaming_transcriber is None:
+            print("Loading whisper.cpp streaming model...")
+            self._streaming_transcriber = StreamingTranscriber(
+                model_name="medium",
+                language=self.settings.language
+            )
+        return self._streaming_transcriber
     
     def _ensure_audio_capture(self) -> AudioCapture:
         """Lazy load audio capture"""
@@ -169,46 +186,122 @@ class MWhisperApp:
     
     def _start_recording(self) -> None:
         """Start recording from microphone"""
-        print("\n🎤 Starting recording...")
+        mode = self._get_transcription_mode()
         
-        self._is_recording = True
-        self._recording_start_time = time.time()
-        
-        # Update UI
-        if self._menu_app:
-            self._menu_app.set_status(
-                MenuBarApp.STATUS_RECORDING,
-                "Recording..."
-            )
-        
-        # Start audio capture
-        audio = self._ensure_audio_capture()
-        audio.start()
+        if mode == "streaming":
+            print("\n🎤 Starting streaming recording...")
+            self._is_recording = True
+            self._is_streaming = True
+            self._recording_start_time = time.time()
+            self._last_streamed_text = ""  # Track what we've inserted
+            
+            # Update UI
+            if self._menu_app:
+                self._menu_app.set_status(
+                    MenuBarApp.STATUS_RECORDING,
+                    "Streaming..."
+                )
+            
+            # Start streaming transcription
+            streamer = self._ensure_streaming_transcriber()
+            inserter = self._ensure_text_inserter()
+            
+            def on_partial(text):
+                """Insert text progressively as we transcribe"""
+                nonlocal self
+                
+                # Find new words that haven't been inserted yet
+                if text.startswith(self._last_streamed_text):
+                    # New text is an extension of old text
+                    new_part = text[len(self._last_streamed_text):].lstrip()
+                    if new_part:
+                        print(f"[Streaming +] {new_part}")
+                        inserter.insert_fast(new_part + " ")
+                        self._last_streamed_text = text
+                else:
+                    # Text changed completely (whisper.cpp corrected itself)
+                    # Delete old and insert new
+                    if self._last_streamed_text:
+                        # Use backspace to delete old text
+                        old_len = len(self._last_streamed_text) + 1  # +1 for trailing space
+                        inserter.delete_backwards(old_len)
+                    
+                    print(f"[Streaming] {text}")
+                    inserter.insert_fast(text + " ")
+                    self._last_streamed_text = text
+            
+            streamer.on_partial = on_partial
+            streamer.start_streaming(device_id=self.settings.microphone_id)
+        else:
+            # Parakeet mode (original behavior)
+            print("\n🎤 Starting recording...")
+            
+            self._is_recording = True
+            self._is_streaming = False
+            self._recording_start_time = time.time()
+            
+            # Update UI
+            if self._menu_app:
+                self._menu_app.set_status(
+                    MenuBarApp.STATUS_RECORDING,
+                    "Recording..."
+                )
+            
+            # Start audio capture
+            audio = self._ensure_audio_capture()
+            audio.start()
     
     def _stop_recording(self) -> None:
         """Stop recording and process audio"""
-        print("⏹ Stopping recording...")
+        mode = self._get_transcription_mode()
         
-        # Get recorded audio
-        audio = self._ensure_audio_capture()
-        audio_data = audio.stop()
-        
-        duration = time.time() - self._recording_start_time
-        self._is_recording = False
-        
-        # Update UI
-        if self._menu_app:
-            self._menu_app.set_status(
-                MenuBarApp.STATUS_PROCESSING,
-                "Transcribing..."
-            )
-        
-        # Process in background
-        threading.Thread(
-            target=self._process_audio,
-            args=(audio_data, duration),
-            daemon=True
-        ).start()
+        if mode == "streaming" and self._is_streaming:
+            print("⏹ Stopping streaming...")
+            
+            # Update UI
+            if self._menu_app:
+                self._menu_app.set_status(
+                    MenuBarApp.STATUS_PROCESSING,
+                    "Finalizing..."
+                )
+            
+            # Stop streaming and get final text
+            streamer = self._ensure_streaming_transcriber()
+            final_text = streamer.stop_streaming()
+            
+            duration = time.time() - self._recording_start_time
+            self._is_recording = False
+            self._is_streaming = False
+            
+            # Filter filler words
+            if self.settings.filter_fillers and final_text:
+                final_text = filter_fillers(final_text)
+            
+            self._on_processing_complete(final_text, duration, "auto")
+        else:
+            # Parakeet mode (original behavior)
+            print("⏹ Stopping recording...")
+            
+            # Get recorded audio
+            audio = self._ensure_audio_capture()
+            audio_data = audio.stop()
+            
+            duration = time.time() - self._recording_start_time
+            self._is_recording = False
+            
+            # Update UI
+            if self._menu_app:
+                self._menu_app.set_status(
+                    MenuBarApp.STATUS_PROCESSING,
+                    "Transcribing..."
+                )
+            
+            # Process in background
+            threading.Thread(
+                target=self._process_audio,
+                args=(audio_data, duration),
+                daemon=True
+            ).start()
     
     def _start_translate_recording(self) -> None:
         """Start recording for translation"""

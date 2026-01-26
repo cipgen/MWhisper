@@ -10,7 +10,7 @@ import threading
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                                QLabel, QLineEdit, QPushButton, QCheckBox, 
                                QMessageBox, QFrame, QSpacerItem, QSizePolicy, QDialog,
-                               QPlainTextEdit, QScrollArea)
+                               QPlainTextEdit, QScrollArea, QComboBox)
 from PySide6.QtCore import Qt, Signal, QObject, QSize
 from PySide6.QtGui import QFont, QIcon
 
@@ -248,6 +248,7 @@ class SettingsWindow(QWidget):
     def _save_config(self):
         try:
             self.config["openai_api_key"] = self.api_key_input.text().strip()
+            self.config["transcription_mode"] = self.mode_combo.currentData()
             self.config["translation_prompt"] = self.prompt_input.toPlainText().strip()
             self.config["fix_prompt"] = self.fix_prompt_input.toPlainText().strip()
             
@@ -286,6 +287,34 @@ class SettingsWindow(QWidget):
         key_input_container.addWidget(self.chk_show_key)
         
         main_layout.addLayout(key_input_container)
+        
+        main_layout.addSpacing(10)
+        
+        # --- Transcription Mode ---
+        lbl_mode = QLabel("Transcription Mode")
+        lbl_mode.setProperty("class", "SectionTitle")
+        main_layout.addWidget(lbl_mode)
+        
+        mode_row = QHBoxLayout()
+        lbl_mode_desc = QLabel("Engine")
+        lbl_mode_desc.setProperty("class", "FieldLabel")
+        lbl_mode_desc.setMinimumWidth(100)
+        mode_row.addWidget(lbl_mode_desc)
+        
+        mode_row.addStretch()
+        
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Parakeet (Offline)", "parakeet")
+        self.mode_combo.addItem("Streaming (Real-time)", "streaming")
+        self.mode_combo.setFixedWidth(180)
+        
+        current_mode = self.config.get("transcription_mode", "parakeet")
+        idx = self.mode_combo.findData(current_mode)
+        if idx >= 0:
+            self.mode_combo.setCurrentIndex(idx)
+        
+        mode_row.addWidget(self.mode_combo)
+        main_layout.addLayout(mode_row)
         
         main_layout.addSpacing(5)
         

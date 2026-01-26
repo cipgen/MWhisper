@@ -274,6 +274,103 @@ class TextInserter:
             import traceback
             traceback.print_exc()
             return False
+    
+    def delete_backwards(self, count: int) -> bool:
+        """
+        Delete characters backwards (simulate pressing backspace multiple times).
+        Used for streaming mode to delete old partial text.
+        
+        Args:
+            count: Number of characters to delete
+            
+        Returns:
+            True if successful
+        """
+        if count <= 0:
+            return True
+        
+        try:
+            import Quartz
+            import time
+            
+            # Simulate backspace key presses using Quartz
+            # Backspace keycode is 0x33
+            for i in range(count):
+                # Key down
+                key_down = Quartz.CGEventCreateKeyboardEvent(None, 0x33, True)
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, key_down)
+                
+                # Key up
+                key_up = Quartz.CGEventCreateKeyboardEvent(None, 0x33, False)
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, key_up)
+                
+                # Small delay between keypresses to avoid overwhelming
+                if i % 10 == 0 and i > 0:
+                    time.sleep(0.01)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Delete backwards error: {e}")
+            return False
+    
+    def insert_fast(self, text: str) -> bool:
+        """
+        Fast text insertion using clipboard + Quartz paste.
+        Works from background threads.
+        
+        Args:
+            text: Text to insert
+            
+        Returns:
+            True if successful
+        """
+        if not text:
+            return True
+        
+        try:
+            import Quartz
+            from AppKit import NSPasteboard, NSPasteboardTypeString
+            import time
+            
+            # Set clipboard using NSPasteboard (thread-safe)
+            pasteboard = NSPasteboard.generalPasteboard()
+            pasteboard.clearContents()
+            pasteboard.setString_forType_(text, NSPasteboardTypeString)
+            
+            # Small delay for clipboard to sync
+            time.sleep(0.05)
+            
+            # Simulate Cmd+V using Quartz (works from any thread)
+            # Cmd down
+            cmd_down = Quartz.CGEventCreateKeyboardEvent(None, 0x37, True)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, cmd_down)
+            
+            # V down with Cmd flag
+            v_down = Quartz.CGEventCreateKeyboardEvent(None, 0x09, True)
+            Quartz.CGEventSetFlags(v_down, Quartz.kCGEventFlagMaskCommand)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, v_down)
+            
+            # V up
+            v_up = Quartz.CGEventCreateKeyboardEvent(None, 0x09, False)
+            Quartz.CGEventSetFlags(v_up, Quartz.kCGEventFlagMaskCommand)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, v_up)
+            
+            # Cmd up
+            cmd_up = Quartz.CGEventCreateKeyboardEvent(None, 0x37, False)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, cmd_up)
+            
+            # Small delay after paste
+            time.sleep(0.05)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Fast insert error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def set_method(self, method: str) -> None:
         """Set the insertion method"""
         if method in ("keystroke", "clipboard"):

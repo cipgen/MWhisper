@@ -14,13 +14,14 @@ block_cipher = None
 project_root = os.path.dirname(os.path.abspath(SPEC))
 
 
-# Collect all resources for parakeet_mlx and mlx
+# Collect all resources for parakeet_mlx, mlx, and pywhispercpp
 tmp_ret_parakeet = collect_all('parakeet_mlx')
 tmp_ret_mlx = collect_all('mlx')
+tmp_ret_whisper = collect_all('pywhispercpp')
 
-datas = tmp_ret_parakeet[0] + tmp_ret_mlx[0]
-binaries = tmp_ret_parakeet[1] + tmp_ret_mlx[1]
-hiddenimports = tmp_ret_parakeet[2] + tmp_ret_mlx[2]
+datas = tmp_ret_parakeet[0] + tmp_ret_mlx[0] + tmp_ret_whisper[0]
+binaries = tmp_ret_parakeet[1] + tmp_ret_mlx[1] + tmp_ret_whisper[1]
+hiddenimports = tmp_ret_parakeet[2] + tmp_ret_mlx[2] + tmp_ret_whisper[2]
 
 # Add FFmpeg binary for parakeet-mlx audio loading
 import shutil
@@ -60,6 +61,7 @@ a = Analysis(
         'src.app',
         'src.audio_capture',
         'src.transcriber',
+        'src.streaming_transcriber',
         'src.filler_filter',
         'src.hotkeys',
         'src.text_inserter',

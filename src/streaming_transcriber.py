@@ -51,9 +51,11 @@ class StreamingTranscriber:
         self.chunk_duration = 0.3  # Process chunks every 300ms for faster response
         self.chunk_size = int(self.sample_rate * self.chunk_duration)
         
-        # Buffer for accumulating audio
+        # Buffer for accumulating audio - with size limit to prevent memory leak
         self._audio_buffer = []
         self._min_audio_length = 0.5  # Minimum seconds before first transcription
+        self._max_buffer_seconds = 30  # Maximum audio to keep in buffer (prevents memory leak)
+        self._max_buffer_samples = int(self.sample_rate * self._max_buffer_seconds)
         
         self._load_model()
     
@@ -84,6 +86,12 @@ class StreamingTranscriber:
         # Add audio to buffer
         audio_chunk = indata[:, 0].copy()  # Mono
         self._audio_buffer.append(audio_chunk)
+        
+        # Prevent memory leak: trim buffer if too large
+        total_samples = sum(len(chunk) for chunk in self._audio_buffer)
+        while total_samples > self._max_buffer_samples and len(self._audio_buffer) > 1:
+            removed = self._audio_buffer.pop(0)
+            total_samples -= len(removed)
     
     def _process_stream(self) -> None:
         """Background thread that processes audio and generates transcriptions"""

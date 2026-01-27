@@ -126,6 +126,13 @@ class Transcriber:
                 except:
                     pass
                 
+                # CRITICAL: Clear MLX cache to prevent memory leak
+                try:
+                    import mlx.core as mx
+                    mx.metal.clear_cache()
+                except Exception as e:
+                    pass  # Ignore if mlx.metal not available
+                
         except Exception as e:
             print(f"Transcription error: {e}")
             import traceback

@@ -118,7 +118,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='MWhisper.app',
-    icon='assets/app_icon.png',
+    icon='assets/app_icon.icns',
     bundle_identifier='com.mwhisper.app',
     info_plist={
         'CFBundleName': 'MWhisper',

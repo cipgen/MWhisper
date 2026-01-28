@@ -57,10 +57,6 @@ class MenuBarApp(rumps.App):
         
         self._hotkey_display = "⌘⇧D"
         
-        # Animation state
-        self._animation_frame = 0
-        self._animation_timer = None
-        
         # Build menu
         self._build_menu()
         
@@ -99,38 +95,6 @@ class MenuBarApp(rumps.App):
         
         print(f"Warning: Icon not found at {icon_path}")
         return None
-    
-    def _start_animation(self):
-        """Start the recording animation using threading.Timer"""
-        import threading
-        self._animation_running = True
-        self._animation_frame = 0
-        self._schedule_next_frame()
-    
-    def _schedule_next_frame(self):
-        """Schedule the next animation frame"""
-        import threading
-        if self._animation_running and self._status == self.STATUS_RECORDING:
-            self._animation_timer = threading.Timer(self.ANIMATION_INTERVAL, self._animate_icon_threaded)
-            self._animation_timer.daemon = True
-            self._animation_timer.start()
-    
-    def _stop_animation(self):
-        """Stop the recording animation"""
-        self._animation_running = False
-        if self._animation_timer is not None:
-            self._animation_timer.cancel()
-            self._animation_timer = None
-            self._animation_frame = 0
-    
-    def _animate_icon_threaded(self):
-        """Cycle through animation frames (called from thread)"""
-        if self._animation_running and self._status == self.STATUS_RECORDING:
-            icon_path = self._get_icon_path("recording", self._animation_frame)
-            if icon_path:
-                self.icon = icon_path
-            self._animation_frame = (self._animation_frame + 1) % self.ANIMATION_FRAMES
-            self._schedule_next_frame()
     
     def _build_menu(self) -> None:
         """Build the menu items"""
@@ -217,26 +181,20 @@ class MenuBarApp(rumps.App):
             status: One of STATUS_IDLE, STATUS_RECORDING, STATUS_PROCESSING
             message: Optional status message
         """
-        old_status = self._status
         self._status = status
         
-        # Handle animation
-        if status == self.STATUS_RECORDING:
-            self._start_animation()
+        # Update icon
+        icon_path = self._get_icon_path(status)
+        if icon_path:
+            self.icon = icon_path
         else:
-            self._stop_animation()
-            # Update icon for non-recording states
-            icon_path = self._get_icon_path(status)
-            if icon_path:
-                self.icon = icon_path
-            else:
-                # Use emoji as fallback
-                icons = {
-                    self.STATUS_IDLE: "🎤",
-                    self.STATUS_RECORDING: "🔴",
-                    self.STATUS_PROCESSING: "⏳"
-                }
-                self.title = icons.get(status, "🎤")
+            # Use emoji as fallback
+            icons = {
+                self.STATUS_IDLE: "🎤",
+                self.STATUS_RECORDING: "🔴",
+                self.STATUS_PROCESSING: "⏳"
+            }
+            self.title = icons.get(status, "🎤")
         
         # Update toggle button text
         if status == self.STATUS_RECORDING:

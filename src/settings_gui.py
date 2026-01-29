@@ -10,7 +10,7 @@ import threading
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                                QLabel, QLineEdit, QPushButton, QCheckBox, 
                                QMessageBox, QFrame, QSpacerItem, QSizePolicy, QDialog,
-                               QPlainTextEdit, QScrollArea, QComboBox)
+                               QPlainTextEdit, QScrollArea, QComboBox, QGroupBox)
 from PySide6.QtCore import Qt, Signal, QObject, QSize
 from PySide6.QtGui import QFont, QIcon
 
@@ -125,6 +125,21 @@ QPushButton#CancelButton {
 QPushButton#CancelButton:hover {
     color: #FFFFFF;
 }
+
+/* GroupBox */
+QGroupBox { 
+    border: 1px solid #444; 
+    border-radius: 6px; 
+    margin-top: 20px; 
+    padding-top: 15px;
+    font-weight: bold;
+    color: #DDD;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+}
 """
 
 class HotkeyRecorderDialog(QDialog):
@@ -221,7 +236,7 @@ class SettingsWindow(QWidget):
         super().__init__()
         self.setWindowTitle("MWhisper Settings")
         self.setObjectName("SettingsWindow")
-        self.setFixedSize(520, 580) # Slightly wider, same height, no scroll needed
+        self.setFixedSize(550, 650) # Taller and wider for better layout
         
         self.setStyleSheet(STYLE_SHEET)
         
@@ -261,20 +276,50 @@ class SettingsWindow(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
 
     def _setup_ui(self):
-        # Main layout - NO SCROLL AREA
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(25, 25, 25, 25)
-        main_layout.setSpacing(12)
+        # 1. Main Layout with Scroll Area
+        main_layout_outer = QVBoxLayout(self)
+        main_layout_outer.setContentsMargins(0, 0, 0, 0)
+        main_layout_outer.setSpacing(0)
         
-        # --- Section 1: OpenAI ---
-        lbl_openai = QLabel("OpenAI Configuration")
-        lbl_openai.setProperty("class", "SectionTitle")
-        main_layout.addWidget(lbl_openai)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setObjectName("SettingsScroll")
         
-        lbl_key = QLabel("API Key")
-        lbl_key.setProperty("class", "FieldLabel")
-        main_layout.addWidget(lbl_key)
+        content_widget = QWidget()
+        content_widget.setObjectName("ContentWidget")
+        self.content_layout = QVBoxLayout(content_widget)
+        self.content_layout.setContentsMargins(20, 20, 20, 20)
+        self.content_layout.setSpacing(25)
         
+        scroll.setWidget(content_widget)
+        main_layout_outer.addWidget(scroll)
+
+        # --- Section 1: Transcription ---
+        grp_transcription = QGroupBox("Transcription")
+        lay_transcription = QVBoxLayout(grp_transcription)
+        
+        # Mode
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Engine:", objectName="FieldLabel"))
+        
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Parakeet (Offline)", "parakeet")
+        self.mode_combo.addItem("Streaming (Real-time)", "streaming")
+        self.mode_combo.setFixedWidth(200)
+        current_mode = self.config.get("transcription_mode", "parakeet")
+        idx = self.mode_combo.findData(current_mode)
+        if idx >= 0: self.mode_combo.setCurrentIndex(idx)
+        mode_row.addWidget(self.mode_combo)
+        mode_row.addStretch()
+        lay_transcription.addLayout(mode_row)
+        
+        self.content_layout.addWidget(grp_transcription)
+
+        # --- Section 2: OpenAI ---
+        grp_openai = QGroupBox("OpenAI / Translation")
+        lay_openai = QVBoxLayout(grp_openai)
+        
+        lay_openai.addWidget(QLabel("API Key:", objectName="FieldLabel"))
         key_input_container = QHBoxLayout()
         self.api_key_input = QLineEdit(self.config.get("openai_api_key", ""))
         self.api_key_input.setEchoMode(QLineEdit.Password)
@@ -285,76 +330,19 @@ class SettingsWindow(QWidget):
         self.chk_show_key.setCursor(Qt.PointingHandCursor)
         self.chk_show_key.stateChanged.connect(self._toggle_show_key)
         key_input_container.addWidget(self.chk_show_key)
+        lay_openai.addLayout(key_input_container)
         
-        main_layout.addLayout(key_input_container)
+        self.content_layout.addWidget(grp_openai)
         
-        main_layout.addSpacing(10)
+        # --- Section 3: Standard Actions ---
+        grp_std = QGroupBox("Standard Actions")
+        lay_std = QVBoxLayout(grp_std)
+        lay_std.setSpacing(10)
         
-        # --- Transcription Mode ---
-        lbl_mode = QLabel("Transcription Mode")
-        lbl_mode.setProperty("class", "SectionTitle")
-        main_layout.addWidget(lbl_mode)
-        
-        mode_row = QHBoxLayout()
-        lbl_mode_desc = QLabel("Engine")
-        lbl_mode_desc.setProperty("class", "FieldLabel")
-        lbl_mode_desc.setMinimumWidth(100)
-        mode_row.addWidget(lbl_mode_desc)
-        
-        mode_row.addStretch()
-        
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("Parakeet (Offline)", "parakeet")
-        self.mode_combo.addItem("Streaming (Real-time)", "streaming")
-        self.mode_combo.setFixedWidth(180)
-        
-        current_mode = self.config.get("transcription_mode", "parakeet")
-        idx = self.mode_combo.findData(current_mode)
-        if idx >= 0:
-            self.mode_combo.setCurrentIndex(idx)
-        
-        mode_row.addWidget(self.mode_combo)
-        main_layout.addLayout(mode_row)
-        
-        main_layout.addSpacing(5)
-        
-        # --- Section 2: Prompts ---
-        
-        # Translation
-        trans_lbl = QLabel("Translation Prompt")
-        trans_lbl.setProperty("class", "FieldLabel")
-        main_layout.addWidget(trans_lbl)
-        
-        default_trans = "Переведи этот текст на английский язык. Исправь ошибки и напиши простыми словами. Верни ТОЛЬКО перевод."
-        current_trans = self.config.get("translation_prompt", default_trans)
-        self.prompt_input = QPlainTextEdit(current_trans)
-        self.prompt_input.setPlaceholderText("Enter your translation instructions here...")
-        self.prompt_input.setFixedHeight(50) # Very compact
-        main_layout.addWidget(self.prompt_input)
-        
-        # Smart Fix
-        fix_lbl = QLabel("Smart Fix Prompt")
-        fix_lbl.setProperty("class", "FieldLabel")
-        main_layout.addWidget(fix_lbl)
-        
-        default_fix = "Исправь грамматические ошибки, расставь знаки препинания и улучши стиль. Не переводи. Верни ТОЛЬКО исправленный текст."
-        current_fix = self.config.get("fix_prompt", default_fix)
-        self.fix_prompt_input = QPlainTextEdit(current_fix)
-        self.fix_prompt_input.setPlaceholderText("Enter instructions for grammar and style fixes...")
-        self.fix_prompt_input.setFixedHeight(50) # Very compact
-        main_layout.addWidget(self.fix_prompt_input)
-        
-        main_layout.addSpacing(10)
-        
-        # --- Section 3: Hotkeys ---
-        lbl_hk = QLabel("Hotkeys (Push-to-Talk)")
-        lbl_hk.setProperty("class", "SectionTitle")
-        main_layout.addWidget(lbl_hk)
-        
-        def add_hotkey_row(label, key, config_key, default_val):
+        def add_hotkey_row(layout, label, key, config_key, default_val):
             row = QHBoxLayout()
             lbl = QLabel(label)
-            lbl.setMinimumWidth(100) 
+            lbl.setMinimumWidth(120) 
             lbl.setProperty("class", "FieldLabel")
             row.addWidget(lbl)
             
@@ -367,48 +355,100 @@ class SettingsWindow(QWidget):
             edit.setReadOnly(True)
             edit.setAlignment(Qt.AlignCenter)
             edit.setProperty("class", "HotkeyDisplay")
-            edit.setFixedWidth(100) # Give it space
+            edit.setFixedWidth(140)
             edit.setFocusPolicy(Qt.NoFocus)
             row.addWidget(edit)
             
-            # WIDER GAP
             row.addSpacing(10)
             
             btn = QPushButton("Change")
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedWidth(75) # Wider button for "Change" text
+            btn.setFixedWidth(80)
             btn.clicked.connect(lambda: self._open_recorder(key))
             row.addWidget(btn)
             
-            main_layout.addLayout(row)
+            layout.addLayout(row)
             return edit
 
-        self.edit_dictation = add_hotkey_row("Dictation", "dictation", "hotkey", "<cmd>+<shift>+d")
-        self.edit_translate = add_hotkey_row("Translation", "translate", "translate_hotkey", "<cmd>+<shift>+u")
-        self.edit_fix = add_hotkey_row("Smart Fix", "fix", "fix_hotkey", "<cmd>+<shift>+e")
+        self.edit_dictation = add_hotkey_row(lay_std, "Dictation", "dictation", "hotkey", "<cmd>+<shift>+d")
+        self.edit_translate = add_hotkey_row(lay_std, "Translation", "translate", "translate_hotkey", "<cmd>+<shift>+u")
+        self.edit_fix = add_hotkey_row(lay_std, "Smart Fix", "fix", "fix_hotkey", "<cmd>+<shift>+e")
         
-        main_layout.addStretch()
+        self.content_layout.addWidget(grp_std)
         
+        # --- Section 4: Custom Actions ---
+        grp_custom = QGroupBox("Custom Actions")
+        lay_custom_outer = QVBoxLayout(grp_custom)
+        
+        cust_header = QHBoxLayout()
+        cust_header.addStretch()
+        btn_add = QPushButton("+ Add Action")
+        btn_add.setCursor(Qt.PointingHandCursor)
+        btn_add.setStyleSheet("background-color: #2D6A4F; font-weight: bold;") 
+        btn_add.clicked.connect(self._add_custom_action)
+        cust_header.addWidget(btn_add)
+        lay_custom_outer.addLayout(cust_header)
+        
+        # Container for list
+        self.actions_layout = QVBoxLayout()
+        self.actions_layout.setSpacing(8)
+        lay_custom_outer.addLayout(self.actions_layout)
+        
+        # Load Existing
+        self.custom_actions = self.config.get("custom_actions", [])
+        if not isinstance(self.custom_actions, list): self.custom_actions = []
+        self._refresh_actions_list()
+        
+        self.content_layout.addWidget(grp_custom)
+        
+        
+        # --- Section 5: Prompts ---
+        grp_prompts = QGroupBox("Default Prompts")
+        lay_prompts = QVBoxLayout(grp_prompts)
+        
+        lay_prompts.addWidget(QLabel("Translation Prompt:", objectName="FieldLabel"))
+        default_trans = "Переведи этот текст на английский язык. Исправь ошибки и напиши простыми словами. Верни ТОЛЬКО перевод."
+        current_trans = self.config.get("translation_prompt", default_trans)
+        self.prompt_input = QPlainTextEdit(current_trans)
+        self.prompt_input.setFixedHeight(60)
+        lay_prompts.addWidget(self.prompt_input)
+        
+        lay_prompts.addWidget(QLabel("Smart Fix Prompt:", objectName="FieldLabel"))
+        default_fix = "Исправь грамматические ошибки, расставь знаки препинания и улучши стиль. Не переводи. Верни ТОЛЬКО исправленный текст."
+        current_fix = self.config.get("fix_prompt", default_fix)
+        self.fix_prompt_input = QPlainTextEdit(current_fix)
+        self.fix_prompt_input.setFixedHeight(60)
+        lay_prompts.addWidget(self.fix_prompt_input)
+        
+        self.content_layout.addWidget(grp_prompts)
+        
+        self.content_layout.addStretch()
+
         # --- Bottom Bar ---
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 10, 0, 0)
-        btn_layout.addStretch()
+        bottom_bar = QWidget()
+        bottom_bar.setObjectName("BottomBar")
+        bottom_bar.setStyleSheet("QWidget#BottomBar { background-color: #2D2D2D; border-top: 1px solid #3A3A3A; }")
+        bb_layout = QHBoxLayout(bottom_bar)
+        bb_layout.setContentsMargins(20, 15, 20, 15)
         
         btn_cancel = QPushButton("Cancel")
         btn_cancel.setObjectName("CancelButton")
         btn_cancel.setCursor(Qt.PointingHandCursor)
         btn_cancel.setFixedWidth(80)
         btn_cancel.clicked.connect(QApplication.quit)
-        btn_layout.addWidget(btn_cancel)
+        bb_layout.addWidget(btn_cancel)
+        
+        bb_layout.addStretch()
         
         btn_save = QPushButton("Save Settings")
         btn_save.setObjectName("PrimaryButton")
         btn_save.setCursor(Qt.PointingHandCursor)
+        btn_save.setFixedWidth(120)
         btn_save.setFixedHeight(32)
         btn_save.clicked.connect(self._save_config)
-        btn_layout.addWidget(btn_save)
+        bb_layout.addWidget(btn_save)
         
-        main_layout.addLayout(btn_layout)
+        main_layout_outer.addWidget(bottom_bar)
 
     def _toggle_show_key(self, state):
         if self.chk_show_key.isChecked():
@@ -451,6 +491,246 @@ class SettingsWindow(QWidget):
             elif target_type == "fix":
                 self.edit_fix.setText(display)
                 self.config["fix_hotkey"] = current_hotkey
+    
+    def _add_custom_action(self):
+        """Open dialog to add new custom action"""
+        dialog = ActionDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            action = dialog.get_action_data()
+            if action:
+                self.custom_actions.append(action)
+                self.config["custom_actions"] = self.custom_actions
+                self._refresh_actions_list()
+
+    def _edit_custom_action(self, action_id):
+        """Edit existing custom action"""
+        # Find action
+        action = next((a for a in self.custom_actions if a["id"] == action_id), None)
+        if not action: return
+        
+        dialog = ActionDialog(self, action)
+        if dialog.exec() == QDialog.Accepted:
+            new_data = dialog.get_action_data()
+            if new_data:
+                # Update in place
+                action.update(new_data)
+                self.config["custom_actions"] = self.custom_actions
+                self._refresh_actions_list()
+    
+    def _delete_custom_action(self, action_id):
+        """Delete custom action"""
+        confirm = QMessageBox.question(
+            self, 
+            "Delete Action", 
+            "Are you sure you want to delete this action?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if confirm == QMessageBox.Yes:
+            self.custom_actions = [a for a in self.custom_actions if a["id"] != action_id]
+            self.config["custom_actions"] = self.custom_actions
+            self._refresh_actions_list()
+
+    def _refresh_actions_list(self):
+        """Re-render the actions list"""
+        # Clear existing
+        while self.actions_layout.count():
+            child = self.actions_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        # Add items
+        if not self.custom_actions:
+            empty_lbl = QLabel("No custom actions defined")
+            empty_lbl.setStyleSheet("color: #666666; font-style: italic; margin: 10px;")
+            empty_lbl.setAlignment(Qt.AlignCenter)
+            self.actions_layout.addWidget(empty_lbl)
+        else:
+            for action in self.custom_actions:
+                item = CustomActionWidget(action, self._get_display_hotkey)
+                item.edit_requested.connect(self._edit_custom_action)
+                item.delete_requested.connect(self._delete_custom_action)
+                self.actions_layout.addWidget(item)
+        
+        self.actions_layout.addStretch()
+
+
+class ActionDialog(QDialog):
+    """Dialog to Add/Edit Custom Action"""
+    def __init__(self, parent=None, action_data=None):
+        super().__init__(parent)
+        self.action_data = action_data or {}
+        self.setWindowTitle("Edit Action" if action_data else "Add Action")
+        self.setFixedSize(450, 480)
+        self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint)
+        self.setModal(True)
+        self.setStyleSheet(STYLE_SHEET)
+        
+        self._init_ui()
+        
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(25, 25, 25, 25)
+        
+        # Name
+        layout.addWidget(QLabel("Action Name", objectName="FieldLabel"))
+        self.name_input = QLineEdit(self.action_data.get("name", ""))
+        self.name_input.setPlaceholderText("e.g. Summarize Text")
+        layout.addWidget(self.name_input)
+        
+        # Hotkey
+        layout.addWidget(QLabel("Hotkey", objectName="FieldLabel"))
+        hk_row = QHBoxLayout()
+        self.hotkey_display = QLineEdit(self.action_data.get("hotkey", ""))
+        self.hotkey_display.setPlaceholderText("Click Record ->")
+        self.hotkey_display.setReadOnly(True)
+        self.hotkey_display.setProperty("class", "HotkeyDisplay")
+        hk_row.addWidget(self.hotkey_display)
+        
+        btn_rec = QPushButton("Record")
+        btn_rec.setFixedWidth(80)
+        btn_rec.setCursor(Qt.PointingHandCursor)
+        btn_rec.clicked.connect(self._record_hotkey)
+        hk_row.addWidget(btn_rec)
+        layout.addLayout(hk_row)
+        
+        self.current_hotkey_pynput = self.action_data.get("hotkey", "")
+        # Update display if existing
+        if self.current_hotkey_pynput:
+             # Hack: Access parent helper if possible
+             pass
+        
+        # Prompt
+        layout.addWidget(QLabel("System Prompt", objectName="FieldLabel"))
+        self.prompt_input = QPlainTextEdit(self.action_data.get("prompt", ""))
+        self.prompt_input.setPlaceholderText("Instruction for LLM (e.g. 'Summarize this text in 3 bullet points')")
+        self.prompt_input.setMinimumHeight(120)
+        layout.addWidget(self.prompt_input)
+        
+        layout.addStretch()
+        
+        # Buttons
+        btns = QHBoxLayout()
+        btns.addStretch()
+        
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("CancelButton")
+        cancel.setCursor(Qt.PointingHandCursor)
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(cancel)
+        
+        save = QPushButton("Save Action")
+        save.setObjectName("PrimaryButton")
+        save.setCursor(Qt.PointingHandCursor)
+        save.clicked.connect(self._save)
+        btns.addWidget(save)
+        
+        layout.addLayout(btns)
+        
+    def _record_hotkey(self):
+        # reuse global recorder
+        dialog = HotkeyRecorderDialog(self, "Record Action Hotkey")
+        
+        rec_hk = None
+        def on_rec(k): nonlocal rec_hk; rec_hk = k
+        dialog.hotkey_recorded.connect(on_rec)
+        
+        if dialog.exec() == QDialog.Accepted and rec_hk:
+            self.current_hotkey_pynput = rec_hk
+            # Format for display
+            display = rec_hk
+            mapping = {'<cmd>': '⌘', '<shift>': '⇧', '<ctrl>': '⌃', '<alt>': '⌥'}
+            for k,v in mapping.items(): display = display.replace(k,v)
+            display = display.replace('+', '').upper()
+            
+            self.hotkey_display.setText(display)
+
+    def _save(self):
+        if not self.name_input.text().strip():
+            QMessageBox.warning(self, "Validation", "Please enter a name.")
+            return
+        if not self.current_hotkey_pynput:
+            QMessageBox.warning(self, "Validation", "Please record a hotkey.")
+            return
+        if not self.prompt_input.toPlainText().strip():
+             QMessageBox.warning(self, "Validation", "Please enter a prompt.")
+             return
+             
+        self.accept()
+
+    def get_action_data(self):
+        import uuid
+        return {
+            "id": self.action_data.get("id", str(uuid.uuid4())),
+            "name": self.name_input.text().strip(),
+            "hotkey": self.current_hotkey_pynput,
+            "prompt": self.prompt_input.toPlainText().strip()
+        }
+
+
+class CustomActionWidget(QFrame):
+    """Row item for custom action list"""
+    edit_requested = Signal(str)
+    delete_requested = Signal(str)
+    
+    def __init__(self, action, format_func):
+        super().__init__()
+        self.action_id = action["id"]
+        
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #333333;
+                border-radius: 6px;
+                border: 1px solid #444444;
+            }
+            QLabel { background: transparent; border: none; }
+        """)
+        self.setFixedHeight(50)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 5)
+        
+        # Name
+        name = QLabel(action["name"])
+        name.setStyleSheet("font-weight: bold; color: white;")
+        layout.addWidget(name)
+        
+        layout.addStretch()
+        
+        # Hotkey Pill
+        hk_text = format_func(action["hotkey"])
+        hk_lbl = QLabel(hk_text)
+        hk_lbl.setStyleSheet("""
+            background-color: #222;
+            color: #AAA;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
+            border: 1px solid #444;
+        """)
+        layout.addWidget(hk_lbl)
+        
+        layout.addSpacing(10)
+        
+        # Edit
+        btn_edit = QPushButton("✎")
+        btn_edit.setFixedSize(24, 24)
+        btn_edit.setCursor(Qt.PointingHandCursor)
+        btn_edit.setToolTip("Edit")
+        btn_edit.setStyleSheet("QPushButton { border: none; background: transparent; color: #AAA; } QPushButton:hover { color: white; }")
+        btn_edit.clicked.connect(lambda: self.edit_requested.emit(self.action_id))
+        layout.addWidget(btn_edit)
+        
+        # Delete
+        btn_del = QPushButton("×")
+        btn_del.setFixedSize(24, 24)
+        btn_del.setCursor(Qt.PointingHandCursor)
+        btn_del.setToolTip("Delete")
+        btn_del.setStyleSheet("QPushButton { border: none; background: transparent; color: #AAA; } QPushButton:hover { color: #FF5555; }")
+        btn_del.clicked.connect(lambda: self.delete_requested.emit(self.action_id))
+        layout.addWidget(btn_del)
+
 
 def run_settings():
     app = QApplication(sys.argv)

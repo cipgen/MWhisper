@@ -127,7 +127,7 @@ class MenuBarApp(rumps.App):
         
         # Version info (for debugging)
         # Version info (for debugging)
-        version_item = rumps.MenuItem("Build: v24-native")
+        version_item = rumps.MenuItem("Build: v25-custom-actions")
         version_item.set_callback(None)
         
         # Build menu

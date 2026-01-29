@@ -129,7 +129,13 @@ class MWhisperApp:
         self._is_fix_recording = False
         self._is_streaming = False  # For streaming mode
         self._recording_start_time = 0.0
+        self._is_streaming = False  # For streaming mode
+        self._recording_start_time = 0.0
         self._lock = threading.Lock()
+        
+        # Action state
+        self._custom_hotkeys = {} # id -> PushToTalkHotkey
+        self._current_action = None # active action dict
     
     def _get_transcription_mode(self) -> str:
         """Get current transcription mode from settings"""
@@ -754,28 +760,121 @@ class MWhisperApp:
             )
             self._fix_hotkey.start()
             
-            # Update menu display
-            if self._menu_app:
-                mapping = {
-                    '<cmd>': '⌘', '<cmd_r>': '⌘',
-                    '<shift>': '⇧', '<shift_r>': '⇧',
-                    '<ctrl>': '⌃', '<ctrl_r>': '⌃',
-                    '<alt>': '⌥', '<alt_r>': '⌥',
-                }
-                display = hotkey_str
-                for k, v in mapping.items():
-                    display = display.replace(k, v).replace('+', '')
-                display = display.upper()
-                
-                self._menu_app.set_hotkey_display(display)
-                # Notification removed as per user request (too many clicks)
-                # self._menu_app.show_notification("MWhisper", "Settings reloaded successfully")
-                
         except Exception as e:
             print(f"Failed to apply new settings: {e}")
             if self._menu_app:
                 self._menu_app.show_alert("Error", f"Failed to apply settings: {e}")
+
+    def _register_custom_hotkeys(self):
+        """Register all custom hotkeys from settings"""
+        # Stop existing
+        for hk in self._custom_hotkeys.values():
+            hk.stop()
+        self._custom_hotkeys.clear()
+        
+        # Start new
+        for action in self.settings.custom_actions:
+            try:
+                hk_str = action.get("hotkey")
+                if hk_str:
+                    # Create closures to capture 'action' variable correctly
+                    def make_press(act): return lambda: self._start_custom_recording(act)
+                    def make_release(act): return lambda: self._stop_custom_recording(act)
+                    
+                    hk = PushToTalkHotkey(
+                        hk_str,
+                        on_press=make_press(action),
+                        on_release=make_release(action)
+                    )
+                    hk.start()
+                    self._custom_hotkeys[action["id"]] = hk
+                    print(f"Registered custom action: {action['name']} ({hk_str})")
+            except Exception as e:
+                print(f"Failed to register custom action {action.get('name')}: {e}")
+
+
     
+    def _start_custom_recording(self, action):
+        """Start recording for a custom action"""
+        print(f"\n⚡ Starting custom action recording: {action['name']}...")
+        self._current_action = action
+        self._recording_start_time = time.time()
+        
+        if self._menu_app:
+            self._menu_app.set_status(
+                MenuBarApp.STATUS_RECORDING,
+                f"Recording ({action['name']})..."
+            )
+            
+        audio = self._ensure_audio_capture()
+        audio.start()
+
+    def _stop_custom_recording(self, action):
+        """Stop custom action recording"""
+        print(f"⏹ Stopping custom action: {action['name']}...")
+        
+        audio = self._ensure_audio_capture()
+        audio_data = audio.stop()
+        
+        duration = time.time() - self._recording_start_time
+        
+        if self._menu_app:
+            self._menu_app.set_status(
+                MenuBarApp.STATUS_PROCESSING,
+                f"Processing ({action['name']})..."
+            )
+            
+        threading.Thread(
+            target=self._process_audio_with_action,
+            args=(audio_data, duration, action),
+            daemon=True
+        ).start()
+        
+        self._current_action = None
+
+    def _process_audio_with_action(self, audio_data, duration, action):
+        """Process audio using custom action prompt"""
+        try:
+            if len(audio_data) == 0:
+                self._on_processing_complete("", duration)
+                return
+            
+            # 1. Transcribe
+            transcriber = self._ensure_transcriber()
+            result = transcriber.transcribe(audio_data)
+            text = result.get("text", "")
+            print(f"Transcription: {text}")
+            
+            if not text:
+                self._on_processing_complete("", duration)
+                return
+                
+            # 2. Apply LLM Prompt
+            api_key = self.settings.get("openai_api_key", "")
+            if not api_key:
+                print("Error: OpenAI API key missing")
+                self._on_processing_complete("Error: API Key missing", duration)
+                return
+                
+            prompt = action.get("prompt", "")
+            
+            # Init/Update translator
+            if self._translator is None:
+                self._translator = Translator(api_key, prompt)
+            else:
+                self._translator.api_key = api_key
+                self._translator.prompt = prompt
+                
+            final_text = self._translator.translate(text)
+            
+            # 3. Complete
+            # We treat custom actions as "processed" text
+            self._on_processing_complete(final_text or "", duration, "custom")
+            
+        except Exception as e:
+            print(f"Custom action error: {e}")
+            self._on_processing_complete("", duration)
+
     def _on_quit(self) -> None:
         """Handle quit"""
         print("Shutting down...")
@@ -880,6 +979,9 @@ class MWhisperApp:
             on_release=self._stop_fix_recording
         )
         self._fix_hotkey.start()
+        
+        # Setup Custom Actions
+        self._register_custom_hotkeys()
         
         # Legacy hotkey manager for change_hotkey functionality
         self._hotkey_manager = HotkeyManager(

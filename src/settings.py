@@ -24,6 +24,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # OpenAI settings
     "openai_api_key": "",
     "translation_prompt": "Переведи этот текст на английский язык. Исправь ошибки и напиши простыми словами. Верни ТОЛЬКО перевод, без пояснений.",
+    # Custom Actions: List[Dict[str, str]] (id, name, hotkey, prompt)
+    "custom_actions": [],
 }
 
 
@@ -170,6 +172,14 @@ class Settings:
     @auto_start.setter
     def auto_start(self, value: bool) -> None:
         self.set("auto_start", value)
+
+    @property
+    def custom_actions(self) -> list:
+        return self.get("custom_actions", [])
+
+    @custom_actions.setter
+    def custom_actions(self, value: list) -> None:
+        self.set("custom_actions", value)
 
 
 # Singleton instance

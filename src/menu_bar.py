@@ -60,7 +60,7 @@ class MenuBarApp(rumps.App):
         # Build menu
         self._build_menu()
         
-    # @rumps.timer(0.5)
+    @rumps.timer(0.5)
     def _on_tick_callback(self, sender):
         """Internal timer callback"""
         if self._on_tick:

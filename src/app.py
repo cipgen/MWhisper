@@ -760,6 +760,9 @@ class MWhisperApp:
             )
             self._fix_hotkey.start()
             
+            # Helper for custom actions
+            self._register_custom_hotkeys()
+            
         except Exception as e:
             print(f"Failed to apply new settings: {e}")
             if self._menu_app:

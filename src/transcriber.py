@@ -1,40 +1,72 @@
 """
 MWhisper Transcriber Module
-Uses Parakeet-MLX for local speech-to-text on Apple Silicon
+Cross-platform speech-to-text transcription
+Uses Parakeet-MLX on macOS, faster-whisper on Windows
 """
 
 import numpy as np
 from typing import Optional, Dict, Any
+from .platform import is_macos, is_windows
 
 
 class Transcriber:
-    """Speech-to-text transcription using Parakeet-MLX"""
+    """Speech-to-text transcription - cross-platform"""
     
     def __init__(self, language: str = "auto"):
         """
-        Initialize the transcriber with Parakeet-MLX model.
+        Initialize the transcriber with appropriate backend.
         
         Args:
             language: Language code or "auto" for auto-detection
         """
         self.language = language
         self.model = None
+        self._backend = "parakeet" if is_macos() else "faster-whisper"
         self._load_model()
     
     def _load_model(self) -> None:
-        """Load the Parakeet-MLX model"""
+        """Load the transcription model"""
+        if is_macos():
+            self._load_parakeet()
+        else:
+            self._load_faster_whisper()
+    
+    def _load_parakeet(self) -> None:
+        """Load Parakeet-MLX model (macOS only)"""
         try:
             from parakeet_mlx import from_pretrained
-            # Load the Parakeet TDT v3 model from HuggingFace
             self.model = from_pretrained("mlx-community/parakeet-tdt-0.6b-v3")
             print("✓ Parakeet-MLX model loaded successfully")
         except ImportError as e:
-            print(f"DEBUG: Failed to import parakeet_mlx: {e}")
             raise ImportError(
                 f"parakeet-mlx import failed: {e}. Run: pip install parakeet-mlx"
             )
         except Exception as e:
             raise RuntimeError(f"Failed to load Parakeet model: {e}")
+    
+    def _load_faster_whisper(self) -> None:
+        """Load faster-whisper model (Windows/Linux)"""
+        try:
+            from faster_whisper import WhisperModel
+            
+            # Use CUDA if available, else CPU
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+            
+            print(f"Loading faster-whisper model on {device}...")
+            self.model = WhisperModel(
+                "medium", 
+                device=device, 
+                compute_type=compute_type
+            )
+            print(f"✓ faster-whisper model loaded successfully ({device})")
+        except ImportError as e:
+            raise ImportError(
+                f"faster-whisper import failed: {e}. Run: pip install faster-whisper torch"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to load faster-whisper model: {e}")
     
     def transcribe(
         self,
@@ -62,37 +94,34 @@ class Transcriber:
         if np.max(np.abs(audio)) > 1.0:
             audio = audio / np.max(np.abs(audio))
         
+        if is_macos():
+            return self._transcribe_parakeet(audio, sample_rate)
+        else:
+            return self._transcribe_faster_whisper(audio, sample_rate)
+    
+    def _transcribe_parakeet(self, audio: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+        """Transcribe using Parakeet-MLX"""
         try:
             import tempfile
             import soundfile as sf
+            import os
             
-            # Parakeet-MLX expects a file path, not a numpy array
-            # Save audio to temporary file
+            # Parakeet-MLX expects a file path
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 temp_path = tmp_file.name
-                # Write audio to temp file
                 sf.write(temp_path, audio, sample_rate)
             
             try:
-                # Ensure FFmpeg is in PATH for parakeet-mlx
-                # In bundled app, ffmpeg is in Contents/Frameworks/
                 import sys
-                import os
                 
                 if getattr(sys, 'frozen', False):
-                    # Running in PyInstaller bundle
                     bundle_dir = sys._MEIPASS
                     frameworks_dir = os.path.join(os.path.dirname(bundle_dir), 'Frameworks')
-                    
-                    # Add Frameworks directory to PATH
                     old_path = os.environ.get('PATH', '')
                     os.environ['PATH'] = frameworks_dir + os.pathsep + old_path
                 
-                # Transcribe using parakeet-mlx with file path
-                # Returns AlignedResult with .text and .sentences attributes
                 result = self.model.transcribe(temp_path)
                 
-                # Handle AlignedResult from parakeet-mlx
                 if hasattr(result, 'text'):
                     text = result.text
                     segments = []
@@ -119,20 +148,46 @@ class Transcriber:
                         "segments": []
                     }
             finally:
-                # Clean up temp file
-                import os
                 try:
                     os.unlink(temp_path)
                 except:
                     pass
                 
-                # CRITICAL: Clear MLX cache to prevent memory leak
                 try:
                     import mlx.core as mx
                     mx.metal.clear_cache()
-                except Exception as e:
-                    pass  # Ignore if mlx.metal not available
+                except:
+                    pass
                 
+        except Exception as e:
+            print(f"Transcription error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"text": "", "language": self.language, "segments": []}
+    
+    def _transcribe_faster_whisper(self, audio: np.ndarray, sample_rate: int) -> Dict[str, Any]:
+        """Transcribe using faster-whisper"""
+        try:
+            language = self.language if self.language != "auto" else None
+            
+            segments, info = self.model.transcribe(
+                audio,
+                language=language,
+                beam_size=5,
+                vad_filter=True
+            )
+            
+            segments_list = list(segments)
+            text = " ".join([seg.text.strip() for seg in segments_list])
+            
+            return {
+                "text": text.strip(),
+                "language": info.language if hasattr(info, 'language') else (language or "en"),
+                "segments": [
+                    {"text": seg.text, "start": seg.start, "end": seg.end}
+                    for seg in segments_list
+                ]
+            }
         except Exception as e:
             print(f"Transcription error: {e}")
             import traceback

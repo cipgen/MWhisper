@@ -1,12 +1,18 @@
 """
 MWhisper Hotkey Manager
-Push-to-talk global hotkeys for macOS using pynput
+Push-to-talk global hotkeys - cross-platform (macOS/Windows/Linux)
+Uses pynput for global keyboard monitoring
 """
 
 from pynput import keyboard
 from typing import Callable, Optional, Set
 import threading
 import subprocess
+import platform
+
+# Platform detection
+IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
 
 
 # Virtual Key Code Map for macOS (QWERTY Physical -> VK Code)
@@ -138,14 +144,24 @@ class PushToTalkHotkey:
     Uses MasterHotkeyListener to share a single keyboard hook.
     """
     
-    # Key name mappings for display
-    KEY_DISPLAY_NAMES = {
-        'cmd': '⌘',
-        'ctrl': '⌃',
-        'alt': '⌥',
-        'shift': '⇧',
-        'space': 'Space',
-    }
+    # Key name mappings for display - platform specific
+    if IS_MACOS:
+        KEY_DISPLAY_NAMES = {
+            'cmd': '⌘',
+            'ctrl': '⌃',
+            'alt': '⌥',
+            'shift': '⇧',
+            'space': 'Space',
+        }
+    else:
+        # Windows/Linux
+        KEY_DISPLAY_NAMES = {
+            'cmd': 'Win',
+            'ctrl': 'Ctrl',
+            'alt': 'Alt',
+            'shift': 'Shift',
+            'space': 'Space',
+        }
     
     # Expose maps via class used by instances, but they refer to module globals now
     VK_MAP = VK_MAP

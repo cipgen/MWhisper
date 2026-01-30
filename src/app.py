@@ -1,6 +1,6 @@
 """
 MWhisper Main Application
-Coordinating module that ties all components together
+Cross-platform coordinating module that ties all components together
 """
 
 import time
@@ -8,6 +8,7 @@ import threading
 import subprocess
 from typing import Optional
 import numpy as np
+import platform
 
 from .audio_capture import AudioCapture, get_audio_level
 from .transcriber import Transcriber
@@ -20,14 +21,25 @@ from .history import DictationHistory, get_history
 from .menu_bar import MenuBarApp, create_menu_bar_app
 from .translator import Translator
 from .settings_window import show_settings_window
+from .platform import is_macos, is_windows
 
 
 def check_accessibility_permission() -> bool:
     """
     Check if accessibility permission is granted.
-    If not, prompts macOS to show the permission dialog.
-    Returns True if permission is granted.
+    On macOS: prompts for Accessibility permission
+    On Windows: always returns True (no special permissions needed)
     """
+    if is_windows():
+        # Windows doesn't require special accessibility permissions
+        print("✓ Running on Windows - no accessibility permission needed")
+        return True
+    
+    if not is_macos():
+        # Linux - assume permissions are OK
+        return True
+    
+    # macOS implementation
     try:
         import ctypes
         import ctypes.util
@@ -85,7 +97,9 @@ def check_accessibility_permission() -> bool:
 
 
 def open_input_monitoring_settings():
-    """Open System Settings → Input Monitoring for hotkey permissions"""
+    """Open System Settings → Input Monitoring for hotkey permissions (macOS only)"""
+    if not is_macos():
+        return
     print("\n⚠️  Input Monitoring permission may be required for hotkeys!")
     print("Opening System Settings → Input Monitoring...")
     subprocess.run([

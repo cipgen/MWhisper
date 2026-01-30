@@ -1,22 +1,32 @@
-# MWhisper - Voice Dictation for Mac M1
-# Dependencies
+# MWhisper - Voice Dictation (Cross-Platform)
+# 
+# For macOS: pip install -r requirements.txt
+# For Windows: pip install -r requirements-windows.txt
 
-# Core transcription
+# ==========================================
+# macOS Dependencies (Apple Silicon)
+# ==========================================
+
+# Core transcription (macOS only - uses Apple MLX)
 parakeet-mlx>=0.1.0
 
-# Audio capture
+# Audio capture (cross-platform)
 sounddevice>=0.4.6
 numpy>=1.24.0
 
-# Hotkeys
+# Hotkeys (cross-platform)
 pynput>=1.7.6
 
-# Menu Bar
+# Menu Bar (macOS only)
 rumps>=0.4.0
 
-# Text insertion & clipboard
+# Text insertion & clipboard (macOS)
 pyperclip>=1.8.2
 pyobjc-framework-Cocoa>=9.0
 
-# OpenAI translation
+# OpenAI translation (cross-platform)
 openai>=1.0.0
+
+# Settings GUI (cross-platform)
+PySide6>=6.5.0
+

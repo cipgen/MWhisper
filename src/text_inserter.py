@@ -1,22 +1,23 @@
 """
 MWhisper Text Inserter
-Inserts text into the active application on macOS
+Cross-platform text insertion into the active application
+Uses Quartz/AppKit on macOS, pyautogui on Windows
 """
 
-import subprocess
 import time
 from typing import Optional
+from .platform import is_macos, is_windows
 
 
 class TextInserter:
-    """Handles text insertion into active window on macOS"""
+    """Handles text insertion into active window - cross-platform"""
     
     def __init__(self, method: str = "clipboard"):
         """
         Initialize text inserter.
         
         Args:
-            method: Insertion method - "keystroke" or "clipboard" (default: clipboard for Unicode support)
+            method: Insertion method - "keystroke" or "clipboard"
         """
         self.method = method
     
@@ -30,147 +31,99 @@ class TextInserter:
         Returns:
             True if successful, False otherwise
         """
-        # print("=== V10: insert() called ===")
         if not text:
             return True
         
         try:
-            # Use Quartz method (robust, doesn't steal focus like osascript)
-            return self._insert_via_clipboard(text)
+            if is_macos():
+                return self._insert_macos(text)
+            elif is_windows():
+                return self._insert_windows(text)
+            else:
+                # Linux fallback
+                return self._insert_linux(text)
         except Exception as e:
             print(f"Text insertion error: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback to AppleScript
-            return self._insert_via_applescript(text)
-    
-    def _insert_via_keystroke(self, text: str) -> bool:
-        """Insert text by simulating keystrokes"""
-        # Escape special characters for AppleScript
-        escaped_text = text.replace('\\', '\\\\').replace('"', '\\"')
-        
-        script = f'''
-        tell application "System Events"
-            keystroke "{escaped_text}"
-        end tell
-        '''
-        
-        result = subprocess.run(
-            ['osascript', '-e', script],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            print(f"AppleScript error: {result.stderr}")
             return False
-        
-        return True
     
-    def _insert_via_accessibility(self, text: str) -> bool:
-        """Insert text using Accessibility API (bypasses keyboard layout)"""
+    def _insert_macos(self, text: str) -> bool:
+        """Insert text on macOS using Quartz"""
         try:
-            import ApplicationServices
-            from ApplicationServices import (
-                AXUIElementCreateSystemWide, 
-                AXUIElementCopyAttributeValue, 
-                AXUIElementSetAttributeValue,
-                kAXFocusedUIElementAttribute, 
-                kAXSelectedTextAttribute,
-                kAXValueSuccess
-            )
-
-            system_wide = AXUIElementCreateSystemWide()
-            error, focused_element = AXUIElementCopyAttributeValue(
-                system_wide, kAXFocusedUIElementAttribute, None
-            )
-
-            if error != kAXValueSuccess or not focused_element:
-                print("DEBUG: Could not get focused element")
-                return False
-
-            # Try to set valid text directly
-            error = AXUIElementSetAttributeValue(
-                focused_element, kAXSelectedTextAttribute, text
-            )
-
-            if error == kAXValueSuccess:
-                print("DEBUG: Accessibility insertion successful")
-                return True
-            else:
-                print(f"DEBUG: Accessibility insertion failed with error: {error}")
-                return False
-
-        except ImportError:
-            print("DEBUG: ApplicationServices module not found (pyobjc framework issue?)")
-            return False
-        except Exception as e:
-            print(f"DEBUG: Accessibility insertion exception: {e}")
-            return False
-
-    def insert_text(self, text: str) -> bool:
-        """Insert text into the active application"""
-        print("=== V9_MARKER: insert_text called ===")  # UNIQUE MARKER
-        if not text:
-            return False
+            from AppKit import NSPasteboard, NSPasteboardTypeString
+            from Foundation import NSData
+            import Quartz
             
-        print(f"Inserting: {text}")
-
-        # Use pure AppleScript - it handles Unicode natively
-        if self._insert_via_applescript(text):
-            print("✓ Text inserted successfully")
+            pasteboard = NSPasteboard.generalPasteboard()
+            
+            # Save current clipboard
+            old_clipboard = None
+            try:
+                old_clipboard = pasteboard.stringForType_(NSPasteboardTypeString)
+            except:
+                pass
+            
+            # Set clipboard
+            pasteboard.clearContents()
+            utf8_data = text.encode('utf-8')
+            ns_data = NSData.dataWithBytes_length_(utf8_data, len(utf8_data))
+            pasteboard.declareTypes_owner_([NSPasteboardTypeString, 'public.utf8-plain-text'], None)
+            pasteboard.setData_forType_(ns_data, 'public.utf8-plain-text')
+            pasteboard.setString_forType_(text, NSPasteboardTypeString)
+            
+            time.sleep(0.2)
+            
+            # Cmd+V via Quartz
+            cmd_down = Quartz.CGEventCreateKeyboardEvent(None, 0x37, True)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, cmd_down)
+            
+            v_down = Quartz.CGEventCreateKeyboardEvent(None, 0x09, True)
+            Quartz.CGEventSetFlags(v_down, Quartz.kCGEventFlagMaskCommand)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, v_down)
+            
+            v_up = Quartz.CGEventCreateKeyboardEvent(None, 0x09, False)
+            Quartz.CGEventSetFlags(v_up, Quartz.kCGEventFlagMaskCommand)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, v_up)
+            
+            cmd_up = Quartz.CGEventCreateKeyboardEvent(None, 0x37, False)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, cmd_up)
+            
+            time.sleep(0.3)
+            
+            # Restore clipboard
+            if old_clipboard is not None:
+                try:
+                    pasteboard.clearContents()
+                    pasteboard.setString_forType_(old_clipboard, NSPasteboardTypeString)
+                except:
+                    pass
+            
             return True
-        
-        return False
+            
+        except Exception as e:
+            print(f"macOS insertion error: {e}")
+            # Fallback to AppleScript
+            return self._insert_macos_applescript(text)
     
-    def _insert_via_applescript(self, text: str) -> bool:
-        """Insert text using pbcopy + AppleScript keystroke"""
-        print("=== V9_MARKER: _insert_via_applescript called ===")  # UNIQUE MARKER
+    def _insert_macos_applescript(self, text: str) -> bool:
+        """Fallback: Insert text on macOS using AppleScript"""
+        import subprocess
+        import os
+        
         try:
-            import subprocess
-            import time
-            import os
-            
-            print(f"[STEP 1] Starting insertion for: {text[:30]}...")
-            
-            # Step 1: Use pbcopy to set clipboard
-            print("[STEP 2] Calling pbcopy...")
             env = os.environ.copy()
             env['LANG'] = 'en_US.UTF-8'
             
-            # Use full path to pbcopy
-            pbcopy_path = '/usr/bin/pbcopy'
-            print(f"[STEP 3] pbcopy path: {pbcopy_path}")
-            
             process = subprocess.Popen(
-                [pbcopy_path],
+                ['/usr/bin/pbcopy'],
                 stdin=subprocess.PIPE,
                 env=env
             )
-            stdout, stderr = process.communicate(text.encode('utf-8'))
-            exit_code = process.wait()
+            process.communicate(text.encode('utf-8'))
             
-            print(f"[STEP 4] pbcopy exit code: {exit_code}")
-            if exit_code != 0:
-                print(f"[ERROR] pbcopy failed with exit code {exit_code}")
-                return False
-            
-            # Step 2: Verify clipboard was set
-            print("[STEP 5] Verifying clipboard with pbpaste...")
-            verify = subprocess.run(['/usr/bin/pbpaste'], capture_output=True, text=True, env=env)
-            print(f"[STEP 6] pbpaste result: '{verify.stdout[:50]}...'")
-            
-            if verify.stdout.strip() != text.strip():
-                print(f"[WARNING] Clipboard mismatch!")
-                print(f"[WARNING] Expected: '{text[:30]}...'")
-                print(f"[WARNING] Got: '{verify.stdout[:30]}...'")
-            
-            # Step 3: Wait for clipboard to be ready
-            print("[STEP 7] Waiting 200ms...")
             time.sleep(0.2)
             
-            # Step 4: Use AppleScript for keystroke
-            print("[STEP 8] Calling osascript for Cmd+V...")
             script = '''
             tell application "System Events"
                 keystroke "v" using command down
@@ -184,101 +137,76 @@ class TextInserter:
                 timeout=10
             )
             
-            print(f"[STEP 9] osascript exit code: {result.returncode}")
-            if result.returncode != 0:
-                print(f"[ERROR] osascript failed: {result.stderr}")
-                return False
-            
-            print("[STEP 10] Insertion complete!")
-            return True
+            return result.returncode == 0
             
         except Exception as e:
-            print(f"[EXCEPTION] Insertion failed: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"AppleScript insertion error: {e}")
             return False
-
-    def _insert_via_clipboard(self, text: str) -> bool:
-        """Insert text via clipboard and paste using native Cocoa + Quartz events"""
+    
+    def _insert_windows(self, text: str) -> bool:
+        """Insert text on Windows using pyautogui"""
         try:
-            import time
-            import subprocess
-            from AppKit import NSPasteboard, NSPasteboardTypeString
-            from Foundation import NSData
-            import Quartz
+            import pyperclip
+            import pyautogui
             
-            # Get pasteboard
-            pasteboard = NSPasteboard.generalPasteboard()
-            
-            # Save current clipboard content
+            # Save current clipboard
             old_clipboard = None
             try:
-                old_clipboard = pasteboard.stringForType_(NSPasteboardTypeString)
+                old_clipboard = pyperclip.paste()
             except:
                 pass
             
-            # CRITICAL: Clear and set data as UTF-8 bytes
-            pasteboard.clearContents()
+            # Set clipboard and paste
+            pyperclip.copy(text)
+            time.sleep(0.1)
             
-            # Convert text to UTF-8 NSData and set using declareTypes/setData
-            utf8_data = text.encode('utf-8')
-            ns_data = NSData.dataWithBytes_length_(utf8_data, len(utf8_data))
+            # Ctrl+V to paste
+            pyautogui.hotkey('ctrl', 'v')
             
-            # Declare both string and UTF-8 types
-            pasteboard.declareTypes_owner_([NSPasteboardTypeString, 'public.utf8-plain-text'], None)
-            pasteboard.setData_forType_(ns_data, 'public.utf8-plain-text')
-            pasteboard.setString_forType_(text, NSPasteboardTypeString)
-            
-            print(f"DEBUG: Set clipboard to: {text[:50]}...")
-            
-            # Longer delay to ensure clipboard is updated
             time.sleep(0.2)
             
-            # Use Quartz to simulate Cmd+V (Physical Key Code 9)
-            # This is more robust than AppleScript
-            print("DEBUG: Simulating Cmd+V via Quartz...")
-            
-            # Cmd down
-            cmd_down = Quartz.CGEventCreateKeyboardEvent(None, 0x37, True) # kVK_Command
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, cmd_down)
-            
-            # V down (keycode 0x09)
-            v_down = Quartz.CGEventCreateKeyboardEvent(None, 0x09, True) # kVK_ANSI_V
-            Quartz.CGEventSetFlags(v_down, Quartz.kCGEventFlagMaskCommand)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, v_down)
-            
-            # V up
-            v_up = Quartz.CGEventCreateKeyboardEvent(None, 0x09, False)
-            Quartz.CGEventSetFlags(v_up, Quartz.kCGEventFlagMaskCommand)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, v_up)
-            
-            # Cmd up
-            cmd_up = Quartz.CGEventCreateKeyboardEvent(None, 0x37, False)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, cmd_up)
-            
-            # Delay before restoring clipboard
-            time.sleep(0.3)
-            
-            # Restore clipboard after paste
+            # Restore clipboard
             if old_clipboard is not None:
                 try:
-                    pasteboard.clearContents()
-                    pasteboard.setString_forType_(old_clipboard, NSPasteboardTypeString)
+                    pyperclip.copy(old_clipboard)
                 except:
                     pass
             
             return True
             
-        except Exception as e:
-            print(f"Clipboard insertion error: {e}")
-            import traceback
-            traceback.print_exc()
+        except ImportError as e:
+            print(f"Windows insertion requires pyautogui and pyperclip: {e}")
             return False
+        except Exception as e:
+            print(f"Windows insertion error: {e}")
+            return False
+    
+    def _insert_linux(self, text: str) -> bool:
+        """Insert text on Linux using xdotool or pyautogui"""
+        try:
+            import pyperclip
+            import pyautogui
+            
+            pyperclip.copy(text)
+            time.sleep(0.1)
+            pyautogui.hotkey('ctrl', 'v')
+            
+            return True
+        except Exception as e:
+            print(f"Linux insertion error: {e}")
+            # Fallback to xdotool
+            try:
+                import subprocess
+                subprocess.run(['xclip', '-selection', 'clipboard'], input=text.encode(), check=True)
+                subprocess.run(['xdotool', 'key', 'ctrl+v'], check=True)
+                return True
+            except:
+                return False
     
     def delete_backwards(self, count: int) -> bool:
         """
-        Delete characters backwards (simulate pressing backspace multiple times).
-        Used for streaming mode to delete old partial text.
+        Delete characters backwards (simulate pressing backspace).
+        Used for streaming mode.
         
         Args:
             count: Number of characters to delete
@@ -290,34 +218,44 @@ class TextInserter:
             return True
         
         try:
-            import Quartz
-            import time
-            
-            # Simulate backspace key presses using Quartz
-            # Backspace keycode is 0x33
-            for i in range(count):
-                # Key down
-                key_down = Quartz.CGEventCreateKeyboardEvent(None, 0x33, True)
-                Quartz.CGEventPost(Quartz.kCGHIDEventTap, key_down)
-                
-                # Key up
-                key_up = Quartz.CGEventCreateKeyboardEvent(None, 0x33, False)
-                Quartz.CGEventPost(Quartz.kCGHIDEventTap, key_up)
-                
-                # Small delay between keypresses to avoid overwhelming
-                if i % 10 == 0 and i > 0:
-                    time.sleep(0.01)
-            
-            return True
-            
+            if is_macos():
+                return self._delete_backwards_macos(count)
+            else:
+                return self._delete_backwards_windows(count)
         except Exception as e:
             print(f"Delete backwards error: {e}")
             return False
     
+    def _delete_backwards_macos(self, count: int) -> bool:
+        """Delete backwards on macOS using Quartz"""
+        import Quartz
+        
+        for i in range(count):
+            key_down = Quartz.CGEventCreateKeyboardEvent(None, 0x33, True)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, key_down)
+            
+            key_up = Quartz.CGEventCreateKeyboardEvent(None, 0x33, False)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, key_up)
+            
+            if i % 10 == 0 and i > 0:
+                time.sleep(0.01)
+        
+        return True
+    
+    def _delete_backwards_windows(self, count: int) -> bool:
+        """Delete backwards on Windows using pyautogui"""
+        import pyautogui
+        
+        for i in range(count):
+            pyautogui.press('backspace')
+            if i % 10 == 0 and i > 0:
+                time.sleep(0.01)
+        
+        return True
+    
     def insert_fast(self, text: str) -> bool:
         """
-        Fast text insertion using clipboard + Quartz paste.
-        Works from background threads.
+        Fast text insertion for streaming mode.
         
         Args:
             text: Text to insert
@@ -329,46 +267,62 @@ class TextInserter:
             return True
         
         try:
+            if is_macos():
+                return self._insert_fast_macos(text)
+            else:
+                return self._insert_fast_windows(text)
+        except Exception as e:
+            print(f"Fast insert error: {e}")
+            return False
+    
+    def _insert_fast_macos(self, text: str) -> bool:
+        """Fast insert on macOS"""
+        try:
             import Quartz
             from AppKit import NSPasteboard, NSPasteboardTypeString
-            import time
             
-            # Set clipboard using NSPasteboard (thread-safe)
             pasteboard = NSPasteboard.generalPasteboard()
             pasteboard.clearContents()
             pasteboard.setString_forType_(text, NSPasteboardTypeString)
             
-            # Small delay for clipboard to sync
             time.sleep(0.05)
             
-            # Simulate Cmd+V using Quartz (works from any thread)
-            # Cmd down
             cmd_down = Quartz.CGEventCreateKeyboardEvent(None, 0x37, True)
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, cmd_down)
             
-            # V down with Cmd flag
             v_down = Quartz.CGEventCreateKeyboardEvent(None, 0x09, True)
             Quartz.CGEventSetFlags(v_down, Quartz.kCGEventFlagMaskCommand)
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, v_down)
             
-            # V up
             v_up = Quartz.CGEventCreateKeyboardEvent(None, 0x09, False)
             Quartz.CGEventSetFlags(v_up, Quartz.kCGEventFlagMaskCommand)
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, v_up)
             
-            # Cmd up
             cmd_up = Quartz.CGEventCreateKeyboardEvent(None, 0x37, False)
             Quartz.CGEventPost(Quartz.kCGHIDEventTap, cmd_up)
             
-            # Small delay after paste
             time.sleep(0.05)
             
             return True
             
         except Exception as e:
             print(f"Fast insert error: {e}")
-            import traceback
-            traceback.print_exc()
+            return False
+    
+    def _insert_fast_windows(self, text: str) -> bool:
+        """Fast insert on Windows"""
+        try:
+            import pyperclip
+            import pyautogui
+            
+            pyperclip.copy(text)
+            time.sleep(0.05)
+            pyautogui.hotkey('ctrl', 'v')
+            time.sleep(0.05)
+            
+            return True
+        except Exception as e:
+            print(f"Fast insert error: {e}")
             return False
     
     def set_method(self, method: str) -> None:
@@ -379,38 +333,47 @@ class TextInserter:
     @staticmethod
     def get_active_app() -> Optional[str]:
         """Get the name of the currently active application"""
-        script = '''
-        tell application "System Events"
-            return name of first application process whose frontmost is true
-        end tell
-        '''
-        
-        result = subprocess.run(
-            ['osascript', '-e', script],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode == 0:
-            return result.stdout.strip()
+        if is_macos():
+            import subprocess
+            script = '''
+            tell application "System Events"
+                return name of first application process whose frontmost is true
+            end tell
+            '''
+            result = subprocess.run(
+                ['osascript', '-e', script],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        elif is_windows():
+            try:
+                import win32gui
+                return win32gui.GetWindowText(win32gui.GetForegroundWindow())
+            except:
+                pass
         return None
     
     @staticmethod
     def check_accessibility() -> bool:
-        """Check if accessibility permission is granted"""
-        script = '''
-        tell application "System Events"
-            return true
-        end tell
-        '''
-        
-        result = subprocess.run(
-            ['osascript', '-e', script],
-            capture_output=True,
-            text=True
-        )
-        
-        return result.returncode == 0
+        """Check if we have required permissions"""
+        if is_macos():
+            import subprocess
+            script = '''
+            tell application "System Events"
+                return true
+            end tell
+            '''
+            result = subprocess.run(
+                ['osascript', '-e', script],
+                capture_output=True,
+                text=True
+            )
+            return result.returncode == 0
+        else:
+            # Windows doesn't require special permissions for this
+            return True
 
 
 def insert_text(text: str, method: str = "clipboard") -> bool:
@@ -419,7 +382,7 @@ def insert_text(text: str, method: str = "clipboard") -> bool:
     
     Args:
         text: Text to insert
-        method: "keystroke" or "clipboard" (default: clipboard for Unicode)
+        method: "keystroke" or "clipboard"
     
     Returns:
         True if successful
@@ -428,23 +391,14 @@ def insert_text(text: str, method: str = "clipboard") -> bool:
     return inserter.insert(text)
 
 
-# Test the module
 if __name__ == "__main__":
     print("Text Inserter Test")
     print("-" * 30)
     
-    # Check accessibility
     if TextInserter.check_accessibility():
-        print("✓ Accessibility permission granted")
+        print("✓ Permissions OK")
     else:
-        print("✗ Accessibility permission required!")
-        print("Go to: System Preferences → Security & Privacy → Privacy → Accessibility")
+        print("✗ Permissions required!")
     
-    # Show active app
     active_app = TextInserter.get_active_app()
     print(f"Active app: {active_app}")
-    
-    # Test insertion (uncomment to test)
-    # print("\nInserting text in 3 seconds...")
-    # time.sleep(3)
-    # insert_text("Hello from MWhisper!")

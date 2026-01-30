@@ -1,0 +1,32 @@
+# MWhisper - Windows Dependencies
+# Use this file to install on Windows:
+# pip install -r requirements-windows.txt
+
+# Core transcription (Windows uses faster-whisper instead of parakeet-mlx)
+faster-whisper>=0.10.0
+torch>=2.0.0
+
+# Audio capture (cross-platform)
+sounddevice>=0.4.6
+numpy>=1.24.0
+soundfile>=0.12.0
+
+# Hotkeys (cross-platform)
+pynput>=1.7.6
+
+# System Tray (Windows uses pystray instead of rumps)
+pystray>=0.19.0
+pillow>=10.0.0
+
+# Text insertion (Windows)
+pyautogui>=0.9.54
+pyperclip>=1.8.2
+
+# Optional: Windows API access (for advanced features)
+# pywin32>=306
+
+# OpenAI translation
+openai>=1.0.0
+
+# Settings GUI
+PySide6>=6.5.0
